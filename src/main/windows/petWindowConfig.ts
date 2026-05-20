@@ -1,0 +1,42 @@
+import type { BrowserWindowConstructorOptions } from "electron";
+
+export const PET_WINDOW_SIZE = {
+  width: 320,
+  height: 560
+} as const;
+
+type WorkAreaSize = {
+  width: number;
+  height: number;
+};
+
+export function createPetWindowOptions(
+  preloadPath: string,
+  workAreaSize: WorkAreaSize
+): BrowserWindowConstructorOptions {
+  return {
+    width: PET_WINDOW_SIZE.width,
+    height: PET_WINDOW_SIZE.height,
+    minWidth: PET_WINDOW_SIZE.width,
+    maxWidth: PET_WINDOW_SIZE.width,
+    minHeight: PET_WINDOW_SIZE.height,
+    maxHeight: PET_WINDOW_SIZE.height,
+    x: Math.max(0, workAreaSize.width - PET_WINDOW_SIZE.width - 70),
+    y: Math.max(0, workAreaSize.height - PET_WINDOW_SIZE.height - 80),
+    title: "",
+    transparent: true,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: false,
+    hasShadow: false,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  };
+}
