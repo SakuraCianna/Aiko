@@ -1,4 +1,5 @@
-import { ChangeEvent, FormEvent, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEvent, SubmitEvent as ReactSubmitEvent } from "react";
 import { ImagePlus, Mic, Send, Square, X } from "lucide-react";
 import {
   isImageMimeType,
@@ -26,7 +27,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const streamRef = useRef<MediaStream | null>(null);
 
   // 提交当前文本和附件.
-  function submit(event: FormEvent) {
+  function submit(event: ReactSubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = value.trim();
     if (!trimmed && attachments.length === 0) return;
@@ -158,7 +159,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
         <div className="attachment-strip" aria-label="已选择的附件">
           {attachments.map((attachment) => (
             <span key={attachment.id} className="attachment-chip">
-              {attachment.kind === "image" ? "图片" : "语音"} · {attachment.name}
+              {attachment.kind === "image" ? "图片" : "语音"} - {attachment.name}
               <button type="button" title="移除附件" onClick={() => removeAttachment(attachment.id)}>
                 <X size={13} />
               </button>

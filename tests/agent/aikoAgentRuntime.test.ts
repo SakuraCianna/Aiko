@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AIKO_CHAT_TEMPERATURE, createAikoAgentRuntime, extractAssistantText } from "../../src/main/agent/aikoAgentRuntime";
+import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
 import type { ChatPayload } from "../../src/shared/chatPayload";
 
@@ -78,6 +79,29 @@ describe("createAikoAgentRuntime", () => {
     const response = await runtime.respond(textPayload("帮我规划今晚的学习安排"));
 
     expect(response).toEqual({ message: "先处理最重要的一项,再安排复习和休息." });
+  });
+
+  it("records retriever and planner lifecycle events for each request", async () => {
+    const traceRecorder = createAikoTraceRecorder();
+    const runtime = createAikoAgentRuntime({
+      traceRecorder,
+      agent: {
+        async invoke() {
+          return {
+            messages: [{ role: "assistant", content: "先这样安排." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("帮我规划今晚的学习安排"));
+
+    expect(traceRecorder.list()[0]?.events.map((event) => event.name)).toEqual([
+      "retriever.completed",
+      "planner.completed",
+      "agent.completed",
+      "request.completed"
+    ]);
   });
 
   it("uses speech understanding transcripts for deterministic local actions", async () => {
