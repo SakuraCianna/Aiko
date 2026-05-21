@@ -104,6 +104,47 @@ describe("createAikoAgentRuntime", () => {
     ]);
   });
 
+  it("keeps model-proposed actions isolated across concurrent requests", async () => {
+    const firstGate = createGate();
+    const secondGate = createGate();
+    let factoryCalls = 0;
+    const runtime = createAikoAgentRuntime({
+      agentFactory(actions) {
+        factoryCalls += 1;
+        const requestIndex = factoryCalls;
+        return {
+          async invoke() {
+            if (requestIndex === 1) {
+              await firstGate.promise;
+              actions.push(modelAction("应用 A"));
+              return { messages: [{ role: "assistant", content: "准备打开应用 A." }] };
+            }
+
+            actions.push(modelAction("应用 B"));
+            secondGate.release();
+            return { messages: [{ role: "assistant", content: "准备打开应用 B." }] };
+          }
+        };
+      }
+    });
+
+    const firstResponse = runtime.respond(textPayload("请帮我处理应用 A"));
+    const secondResponse = runtime.respond(textPayload("请帮我处理应用 B"));
+    await secondGate.promise;
+    firstGate.release();
+
+    await expect(firstResponse).resolves.toMatchObject({
+      pendingAction: {
+        target: "应用 A"
+      }
+    });
+    await expect(secondResponse).resolves.toMatchObject({
+      pendingAction: {
+        target: "应用 B"
+      }
+    });
+  });
+
   it("uses speech understanding transcripts for deterministic local actions", async () => {
     let invoked = false;
     const runtime = createAikoAgentRuntime({
@@ -462,5 +503,26 @@ function audioAttachment(): ChatPayload["attachments"][number] {
     mimeType: "audio/webm",
     size: 8,
     dataUrl: "data:audio/webm;base64,AAAA"
+  };
+}
+
+function modelAction(target: string) {
+  return {
+    title: `打开应用:${target}`,
+    source: target,
+    risk: "low" as const,
+    capability: "open_application",
+    target
+  };
+}
+
+function createGate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    promise,
+    release
   };
 }

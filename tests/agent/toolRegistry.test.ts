@@ -25,4 +25,15 @@ describe("createDefaultToolRegistry", () => {
 
     expect(registry.get("shell_command")).toBeNull();
   });
+
+  it("does not expose mutable registry internals", () => {
+    const registry = createDefaultToolRegistry();
+    const [tool] = registry.list();
+
+    if (tool) tool.risk = "high";
+
+    expect(registry.get("open_application")).toMatchObject({
+      risk: "low"
+    });
+  });
 });

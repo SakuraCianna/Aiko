@@ -47,18 +47,26 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
 
 // 创建默认工具注册表, 为 Planner 和模型工具提供统一元信息.
 export function createDefaultToolRegistry(): AikoToolRegistry {
-  const tools = [...DEFAULT_TOOLS];
+  const tools = DEFAULT_TOOLS.map(cloneToolDefinition);
   const byName = new Map(tools.map((definition) => [definition.name, definition]));
 
   return {
     // 列出当前 Agent 可以规划的工具.
     list() {
-      return [...tools];
+      return tools.map(cloneToolDefinition);
     },
 
     // 根据工具名查找工具定义.
     get(name: string) {
-      return byName.get(name) ?? null;
+      const definition = byName.get(name);
+      return definition ? cloneToolDefinition(definition) : null;
     }
+  };
+}
+
+// 克隆工具定义, 避免调用方修改注册表内部状态.
+function cloneToolDefinition(definition: AikoToolDefinition): AikoToolDefinition {
+  return {
+    ...definition
   };
 }

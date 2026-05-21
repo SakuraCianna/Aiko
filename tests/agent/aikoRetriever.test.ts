@@ -50,6 +50,30 @@ describe("createAikoRetriever", () => {
     expect(JSON.stringify(context.userContent)).toContain("不要假装已经理解语音内容");
     expect(JSON.stringify(context.userContent)).toContain("provider 尚未配置");
   });
+
+  it("provides tool hints from the registry", async () => {
+    const retriever = createAikoRetriever({});
+
+    const context = await retriever.retrieve(textPayload("随便聊聊"));
+
+    expect(context.toolHints).toEqual([
+      expect.objectContaining({
+        name: "open_application",
+        capability: "open_application",
+        risk: "low",
+        requiresConfirmation: true
+      }),
+      expect.objectContaining({
+        name: "open_url"
+      }),
+      expect.objectContaining({
+        name: "web_search"
+      }),
+      expect.objectContaining({
+        name: "create_reminder"
+      })
+    ]);
+  });
 });
 
 function textPayload(text: string): ChatPayload {

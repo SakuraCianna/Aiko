@@ -1,4 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
+import type { BaseMessageLike } from "@langchain/core/messages";
 import { ChatOpenAICompletions } from "@langchain/openai";
 import { createAgent, tool } from "langchain";
 import { z } from "zod";
@@ -17,14 +18,18 @@ import { createAikoTraceRecorder } from "./trace/aikoTrace";
 import type { AikoMemoryRuntime } from "./types";
 import type { AikoTraceRecorder } from "./trace/aikoTrace";
 
-type AgentInput = { messages: Array<unknown> };
+type AgentInput = { messages: BaseMessageLike[] };
+type LangChainAgent = ReturnType<typeof createAgent>;
+type AgentStreamOptions = Parameters<LangChainAgent["stream"]>[1];
 
 export const AIKO_CHAT_TEMPERATURE = 0.3;
 
 export type AikoAgentInvoker = {
   invoke: (input: AgentInput) => Promise<unknown>;
-  stream?: (input: AgentInput, options?: unknown) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>;
+  stream?: (input: AgentInput, options?: AgentStreamOptions) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>;
 };
+
+export type AikoAgentFactory = (proposedActions: PendingActionDto[]) => AikoAgentInvoker;
 
 export type AikoAgentRuntime = {
   respond: (payload: ChatPayload) => Promise<ChatResponse>;
@@ -36,6 +41,7 @@ export type MemoryCandidateExtractor = (transcript: string) => Promise<MemoryCan
 export type AikoAgentRuntimeOptions = {
   config?: AppConfig;
   agent?: AikoAgentInvoker;
+  agentFactory?: AikoAgentFactory;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   memoryRuntime?: AikoMemoryRuntime;
   memoryCandidateExtractor?: MemoryCandidateExtractor;
@@ -44,17 +50,18 @@ export type AikoAgentRuntimeOptions = {
 
 // 创建 Aiko 的运行时入口, 负责把消息, 工具, 记忆和语音结果串起来.
 export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAgentRuntime {
-  const proposedActions: PendingActionDto[] = [];
-  const agent = options.agent ?? createDefaultAgent(options.config, proposedActions);
   const speechUnderstandingProvider =
     options.speechUnderstandingProvider;
+  const toolRegistry = createDefaultToolRegistry();
   const retriever = createAikoRetriever({
     memoryRuntime: options.memoryRuntime,
-    speechUnderstandingProvider
+    speechUnderstandingProvider,
+    toolRegistry
   });
   const planner = createAikoPlanner();
   const executor = createAikoExecutor();
   const traceRecorder = options.traceRecorder ?? createAikoTraceRecorder();
+  const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
   const memoryCandidateExtractor =
     options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
   const runtimeOptions = {
@@ -99,8 +106,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       return { message: proposal.message };
     }
 
-    proposedActions.length = 0;
+    const proposedActions: PendingActionDto[] = [];
     try {
+      const agent = createRequestAgent(options, defaultAgentFactory, proposedActions);
       const input = {
         messages: [new HumanMessage({ content: context.userContent })]
       };
@@ -141,12 +149,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   };
 }
 
-// 创建默认 LangChain Agent, 并注入 GLM 兼容模型和本地工具.
-function createDefaultAgent(config: AppConfig | undefined, proposedActions: PendingActionDto[]): AikoAgentInvoker {
-  if (!config) {
-    throw new Error("AikoAgentRuntime requires AppConfig when no test agent is injected");
-  }
-
+// 创建默认 LangChain Agent 工厂, 每次请求都注入独立的动作收集器.
+function createDefaultAgentFactory(config: AppConfig, registry = createDefaultToolRegistry()): AikoAgentFactory {
   const model = new ChatOpenAICompletions({
     model: config.glm.model,
     apiKey: config.glm.apiKey,
@@ -157,11 +161,26 @@ function createDefaultAgent(config: AppConfig | undefined, proposedActions: Pend
     }
   });
 
-  return createAgent({
-    model,
-    systemPrompt: buildAikoSystemPrompt(),
-    tools: createAikoTools(proposedActions, createDefaultToolRegistry())
-  }) as unknown as AikoAgentInvoker;
+  return (proposedActions) =>
+    createAgent({
+      model,
+      systemPrompt: buildAikoSystemPrompt(),
+      tools: createAikoTools(proposedActions, registry)
+    });
+}
+
+// 为当前请求创建 Agent, 避免跨请求共享工具动作状态.
+function createRequestAgent(
+  options: AikoAgentRuntimeOptions,
+  defaultAgentFactory: AikoAgentFactory | undefined,
+  proposedActions: PendingActionDto[]
+): AikoAgentInvoker {
+  if (options.agent) return options.agent;
+  const factory = options.agentFactory ?? defaultAgentFactory;
+  if (!factory) {
+    throw new Error("AikoAgentRuntime requires AppConfig when no test agent is injected");
+  }
+  return factory(proposedActions);
 }
 
 // 创建默认记忆候选提取器, 使用低温度模型输出结构化记忆.

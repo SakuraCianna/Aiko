@@ -1,11 +1,14 @@
 import type { ChatPayload } from "../../../shared/chatPayload";
 import type { AgentImagePart, AgentTextPart, AgentUserContent, AikoMemoryRuntime, RetrievedContext } from "../types";
+import { createDefaultToolRegistry } from "../tools/toolRegistry";
+import type { AikoToolRegistry } from "../tools/toolRegistry";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
 
 export type AikoRetrieverOptions = {
   memoryRuntime?: AikoMemoryRuntime;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
+  toolRegistry?: AikoToolRegistry;
 };
 
 export type AikoRetriever = {
@@ -16,6 +19,7 @@ export type AikoRetriever = {
 export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetriever {
   const speechUnderstandingProvider =
     options.speechUnderstandingProvider ?? createPendingSpeechUnderstandingProvider();
+  const toolRegistry = options.toolRegistry ?? createDefaultToolRegistry();
 
   return {
     // 召回记忆, 理解语音, 并构造用户上下文.
@@ -37,7 +41,12 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
         })),
         memories,
         speechResults,
-        toolHints: []
+        toolHints: toolRegistry.list().map((tool) => ({
+          name: tool.name,
+          capability: tool.capability,
+          risk: tool.risk,
+          requiresConfirmation: tool.requiresConfirmation
+        }))
       };
     }
   };
