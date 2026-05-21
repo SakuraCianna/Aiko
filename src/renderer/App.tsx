@@ -10,6 +10,7 @@ import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 
+// 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
 export function App() {
   const [message, setMessage] = useState("");
   const [pendingAction, setPendingAction] = useState<(PendingAction & PendingActionDto) | null>(null);
@@ -27,6 +28,7 @@ export function App() {
     });
   }, []);
 
+  // 发送用户输入到主进程 Agent, 并接收流式回复.
   async function handleCommand(payload: ChatPayload) {
     const requestId = crypto.randomUUID();
     activeStreamIdRef.current = requestId;
@@ -51,11 +53,12 @@ export function App() {
       }
     } catch {
       activeStreamIdRef.current = null;
-      setMessage("我这边暂时没有收到回复，但本地功能还在。");
+      setMessage("我这边暂时没有收到回复,但本地功能还在.");
       showControls();
     }
   }
 
+  // 执行当前待确认动作, 可选择是否记住授权.
   async function executePendingAction(remember: boolean) {
     if (!pendingAction) return;
     const result = await window.aiko.executeAction({
@@ -67,13 +70,15 @@ export function App() {
     setPendingAction(null);
   }
 
+  // 切换窗口点击穿透状态.
   async function toggleClickThrough() {
     const next = !clickThrough;
     setClickThrough(next);
     await window.aiko.setClickThrough(next);
-    setMessage(next ? "点击穿透已开启。用托盘或快捷键可以再叫我。" : "点击穿透已关闭。");
+    setMessage(next ? "点击穿透已开启.用托盘或快捷键可以再叫我." : "点击穿透已关闭.");
   }
 
+  // 显示输入控件并取消隐藏计时器.
   function showControls() {
     if (hideControlsTimerRef.current !== null) {
       window.clearTimeout(hideControlsTimerRef.current);
@@ -82,6 +87,7 @@ export function App() {
     setControlsVisible(true);
   }
 
+  // 延迟隐藏输入控件, 避免鼠标移动时闪烁.
   function hideControlsSoon() {
     if (hideControlsTimerRef.current !== null) {
       window.clearTimeout(hideControlsTimerRef.current);
@@ -120,7 +126,7 @@ export function App() {
         onOnce={() => void executePendingAction(false)}
         onAlways={() => void executePendingAction(true)}
         onCancel={() => {
-          setMessage("已取消。");
+          setMessage("已取消.");
           showControls();
           setPendingAction(null);
         }}

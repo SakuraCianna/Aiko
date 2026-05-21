@@ -6,6 +6,7 @@ export type ApplicationConfig = {
   path: string;
 };
 
+// 根据用户输入匹配应用配置, 并通过 Electron 打开本地程序.
 export async function openApplication(apps: ApplicationConfig[], query: string): Promise<boolean> {
   const normalized = normalize(query);
   const match = apps.find((app) => {
@@ -19,6 +20,7 @@ export async function openApplication(apps: ApplicationConfig[], query: string):
   return error.length === 0;
 }
 
+// 归一化应用名称和别名, 用于宽松匹配.
 function normalize(value: string): string {
   return value.trim().toLowerCase();
 }

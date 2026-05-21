@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
+import { MEMORY_EXTRACTION_PROMPT } from "../../src/main/ai/prompts";
+import type { MemoryType } from "../../src/main/memory/memoryTypes";
 import { recallMemories } from "../../src/main/memory/memoryRecall";
-import { classifyMemoryCandidate } from "../../src/main/memory/silentMemoryWorker";
+import { classifyMemoryCandidate, extractMemoryCandidates } from "../../src/main/memory/silentMemoryWorker";
+
+describe("MEMORY_EXTRACTION_PROMPT", () => {
+  it("lists the same memory types used by the code", () => {
+    const types: MemoryType[] = [
+      "preference",
+      "relationship",
+      "habit",
+      "software",
+      "recent_event",
+      "reminder",
+      "permission",
+      "sensitive"
+    ];
+
+    for (const type of types) {
+      expect(MEMORY_EXTRACTION_PROMPT).toContain(type);
+    }
+    expect(MEMORY_EXTRACTION_PROMPT).not.toContain("fact");
+  });
+});
 
 describe("classifyMemoryCandidate", () => {
   it("silently accepts low-risk preference memory", () => {
@@ -23,6 +45,48 @@ describe("classifyMemoryCandidate", () => {
         requiresConfirmation: true
       })
     ).toEqual("pending_confirmation");
+  });
+});
+
+describe("extractMemoryCandidates", () => {
+  it("filters invalid memory candidates instead of trusting malformed model output", async () => {
+    const candidates = await extractMemoryCandidates("用户:以后叫我 Sakura", async () =>
+      JSON.stringify([
+        {
+          type: "preference",
+          content: "用户喜欢被称呼为 Sakura",
+          confidence: 0.9,
+          requiresConfirmation: false
+        },
+        {
+          type: "fact",
+          content: "不存在的类型不应该进入记忆库",
+          confidence: 0.9,
+          requiresConfirmation: false
+        },
+        {
+          type: "software",
+          content: "",
+          confidence: 0.8,
+          requiresConfirmation: false
+        },
+        {
+          type: "habit",
+          content: "用户晚上更容易学习",
+          confidence: 2,
+          requiresConfirmation: false
+        }
+      ])
+    );
+
+    expect(candidates).toEqual([
+      {
+        type: "preference",
+        content: "用户喜欢被称呼为 Sakura",
+        confidence: 0.9,
+        requiresConfirmation: false
+      }
+    ]);
   });
 });
 

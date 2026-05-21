@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 
+// 创建桌宠的设置和管理面板窗口.
 export function createPanelWindow(preloadPath: string): BrowserWindow {
   return new BrowserWindow({
     width: 960,

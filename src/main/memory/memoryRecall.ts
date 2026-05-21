@@ -4,6 +4,7 @@ export type RecalledMemory = {
   content: string;
 };
 
+// 根据查询文本从记忆列表中筛选相关记忆.
 export function recallMemories(memories: RecalledMemory[], query: string, limit = 5): RecalledMemory[] {
   const terms = buildRecallTerms(query);
 
@@ -14,6 +15,7 @@ export function recallMemories(memories: RecalledMemory[], query: string, limit 
     .slice(0, limit);
 }
 
+// 为中英文查询构造可匹配的召回关键词.
 function buildRecallTerms(query: string): string[] {
   const normalized = query.toLowerCase().trim();
   if (!normalized) return [];

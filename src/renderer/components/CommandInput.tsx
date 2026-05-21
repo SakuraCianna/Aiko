@@ -14,6 +14,7 @@ type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;
 };
 
+// 渲染桌宠底部输入框, 负责文本, 图片和麦克风录音入口.
 export function CommandInput({ onSubmit }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -24,6 +25,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const recordingChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // 提交当前文本和附件.
   function submit(event: FormEvent) {
     event.preventDefault();
     const trimmed = value.trim();
@@ -34,25 +36,26 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     setError("");
   }
 
+  // 校验并读取用户选择的图片文件.
   async function handleImageFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     setError("");
 
     if (attachments.length + selectedFiles.length > MAX_ATTACHMENTS) {
-      setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件。`);
+      setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
       return;
     }
 
     const nextAttachments: ChatAttachment[] = [];
     for (const file of selectedFiles) {
       if (!isImageMimeType(file.type)) {
-        setError("只支持 PNG、JPEG、WebP、GIF 图片。");
+        setError("只支持 PNG,JPEG,WebP,GIF 图片.");
         return;
       }
 
       if (file.size > MAX_IMAGE_BYTES) {
-        setError("单张图片不能超过 5 MB。");
+        setError("单张图片不能超过 5 MB.");
         return;
       }
 
@@ -69,6 +72,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     setAttachments((current) => [...current, ...nextAttachments]);
   }
 
+  // 开始或停止默认麦克风录音.
   async function toggleRecording() {
     setError("");
 
@@ -78,12 +82,12 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     }
 
     if (attachments.length >= MAX_ATTACHMENTS) {
-      setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件。`);
+      setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
       return;
     }
 
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setError("当前环境无法调用麦克风录音。");
+      setError("当前环境无法调用麦克风录音.");
       return;
     }
 
@@ -109,10 +113,11 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     } catch {
       stopMicrophoneStream();
       setIsRecording(false);
-      setError("无法访问默认麦克风，请检查 Windows 麦克风权限。");
+      setError("无法访问默认麦克风,请检查 Windows 麦克风权限.");
     }
   }
 
+  // 停止录音后把音频片段转换成聊天附件.
   async function finishRecording() {
     const chunks = recordingChunksRef.current;
     const mimeType = recorderRef.current?.mimeType || "audio/webm";
@@ -122,13 +127,13 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     setIsRecording(false);
 
     if (chunks.length === 0) {
-      setError("没有录到有效语音。");
+      setError("没有录到有效语音.");
       return;
     }
 
     const blob = new Blob(chunks, { type: mimeType });
     if (blob.size > MAX_AUDIO_BYTES) {
-      setError("单段语音不能超过 15 MB。");
+      setError("单段语音不能超过 15 MB.");
       return;
     }
 
@@ -136,11 +141,13 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     setAttachments((current) => [...current, attachment]);
   }
 
+  // 停止麦克风流, 释放系统录音资源.
   function stopMicrophoneStream() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }
 
+  // 从待发送列表中移除指定附件.
   function removeAttachment(id: string) {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
@@ -195,6 +202,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   );
 }
 
+// 把图片文件读取为 data URL.
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

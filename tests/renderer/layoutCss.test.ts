@@ -16,7 +16,7 @@ describe("renderer layout CSS", () => {
 
   it("reveals command controls from explicit renderer state or input focus", () => {
     expect(styles).not.toContain(".pet-interaction-zone:hover .hover-controls");
-    expect(styles).not.toContain(":has(.live2d-placeholder:hover) .hover-controls");
+    expect(styles).not.toContain(":has(.character-stage:hover) .hover-controls");
     expect(styles).toContain(".hover-controls.controls-visible");
     expect(styles).toContain("display: none");
   });

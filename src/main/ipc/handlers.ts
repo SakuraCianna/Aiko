@@ -17,6 +17,7 @@ export type AikoHandlerDeps = {
   reminderRepository?: Pick<ReminderRepository, "save" | "list">;
 };
 
+// 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const pendingActions = new Map<string, PendingActionDto>();
   const actionExecutor = createActionExecutor({
@@ -43,27 +44,25 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   ipcMain.handle("chat:send-message", async (_event, input: unknown): Promise<ChatResponse> => {
     const payload = parseChatPayload(input);
     if (!payload) {
-      return { message: "这个输入暂时不能处理，可能是附件格式或大小不符合要求。" };
+      return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
 
     try {
       const response = await deps.agentRuntime.respond(payload);
       return respondWithLocalAction(response.message, response.pendingAction);
     } catch {
-      return {
-        message: "我这边暂时没有收到回复，但本地功能还在。"
-      };
+      return { message: "我这边暂时没有收到回复,但本地功能还在." };
     }
   });
 
   ipcMain.handle("chat:stream-message", async (event, requestId: unknown, input: unknown): Promise<ChatResponse> => {
     if (typeof requestId !== "string" || requestId.length === 0) {
-      return { message: "这个流式请求缺少有效 ID。" };
+      return { message: "这个流式请求缺少有效 ID." };
     }
 
     const payload = parseChatPayload(input);
     if (!payload) {
-      return { message: "这个输入暂时不能处理，可能是附件格式或大小不符合要求。" };
+      return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
 
     try {
@@ -72,26 +71,24 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       });
       return respondWithLocalAction(response.message, response.pendingAction);
     } catch {
-      return {
-        message: "我这边暂时没有收到回复，但本地功能还在。"
-      };
+      return { message: "我这边暂时没有收到回复,但本地功能还在." };
     }
   });
 
   ipcMain.handle("action:execute", async (_event, request: unknown) => {
     if (!isExecuteActionRequest(request)) {
-      return { ok: false, message: "这个操作请求格式不正确。" };
+      return { ok: false, message: "这个操作请求格式不正确." };
     }
 
     const actionId = request.action.id;
     if (!actionId) {
-      return { ok: false, message: "这个操作没有有效的确认令牌。" };
+      return { ok: false, message: "这个操作没有有效的确认令牌." };
     }
 
     const pendingAction = pendingActions.get(actionId);
     pendingActions.delete(actionId);
     if (!pendingAction || !sameAction(pendingAction, request.action)) {
-      return { ok: false, message: "这个操作已过期或被修改，请重新发起。" };
+      return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
     return actionExecutor.execute({ action: pendingAction, remember: request.remember });
@@ -106,20 +103,21 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
   ipcMain.handle("memory:accept-candidate", (_event, candidateId: unknown) => {
     if (typeof candidateId !== "string" || !deps.memoryRepository) {
-      return { ok: false, message: "记忆候选不存在。" };
+      return { ok: false, message: "记忆候选不存在." };
     }
     const ok = deps.memoryRepository.acceptCandidate(candidateId);
-    return ok ? { ok: true, message: "已加入长期记忆。" } : { ok: false, message: "记忆候选不存在。" };
+    return ok ? { ok: true, message: "已加入长期记忆." } : { ok: false, message: "记忆候选不存在." };
   });
 
   ipcMain.handle("memory:reject-candidate", (_event, candidateId: unknown) => {
     if (typeof candidateId !== "string" || !deps.memoryRepository) {
-      return { ok: false, message: "记忆候选不存在。" };
+      return { ok: false, message: "记忆候选不存在." };
     }
     const ok = deps.memoryRepository.rejectCandidate(candidateId);
-    return ok ? { ok: true, message: "已忽略这条记忆。" } : { ok: false, message: "记忆候选不存在。" };
+    return ok ? { ok: true, message: "已忽略这条记忆." } : { ok: false, message: "记忆候选不存在." };
   });
 
+  // 根据权限状态决定是直接执行动作还是返回待确认动作.
   async function respondWithLocalAction(
     message: string,
     action: PendingActionDto | undefined
@@ -138,6 +136,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   }
 }
 
+// 校验聊天输入, 无效时返回 null 供 IPC 层降级处理.
 function parseChatPayload(input: unknown): ChatPayload | null {
   try {
     return validateChatPayload(input);
@@ -146,10 +145,12 @@ function parseChatPayload(input: unknown): ChatPayload | null {
   }
 }
 
+// 判断传入值是否是受支持的面板名称.
 function isPanelName(value: unknown): value is PanelName {
   return value === "chat" || value === "reminders" || value === "memory" || value === "settings";
 }
 
+// 校验执行动作请求的基本结构和动作内容.
 function isExecuteActionRequest(value: unknown): value is ExecuteActionRequest {
   if (!value || typeof value !== "object") return false;
   const request = value as ExecuteActionRequest;
@@ -170,6 +171,7 @@ function isExecuteActionRequest(value: unknown): value is ExecuteActionRequest {
   return false;
 }
 
+// 判断待执行动作是否在当前版本支持的安全范围内.
 function isSupportedAction(action: PendingActionDto): boolean {
   if (action.title.length > 180 || action.source.length > 1000 || action.target.length > 2048) return false;
 
@@ -204,6 +206,7 @@ function isSupportedAction(action: PendingActionDto): boolean {
   return false;
 }
 
+// 比较确认时的动作是否和原始待确认动作完全一致.
 function sameAction(left: PendingActionDto, right: PendingActionDto): boolean {
   return (
     left.id === right.id &&

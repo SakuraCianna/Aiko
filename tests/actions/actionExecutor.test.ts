@@ -20,7 +20,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: true,
-      message: "已打开网页。"
+      message: "已打开网页."
     });
     expect(opened).toEqual(["https://example.com"]);
   });
@@ -41,7 +41,7 @@ describe("createActionExecutor", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.message).toBe("已创建提醒：喝水。");
+    expect(result.message).toBe("已创建提醒:喝水.");
     expect(executor.listReminders()).toMatchObject([
       {
         title: "喝水",
@@ -68,7 +68,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: true,
-      message: "已创建提醒：喝水。"
+      message: "已创建提醒:喝水."
     });
     expect(executor.listReminders()).toMatchObject([
       {
@@ -96,7 +96,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "这个操作风险太高，当前版本不会执行。"
+      message: "这个操作风险太高,当前版本不会执行."
     });
   });
 

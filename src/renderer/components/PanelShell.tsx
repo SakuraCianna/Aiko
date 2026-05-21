@@ -13,6 +13,7 @@ const panels: Array<{ id: PanelName; label: string }> = [
   { id: "settings", label: "设置" }
 ];
 
+// 渲染设置面板外壳和顶部标签切换.
 export function PanelShell({ activePanel, onPanelChange, children }: PanelShellProps) {
   return (
     <section className="panel-shell">

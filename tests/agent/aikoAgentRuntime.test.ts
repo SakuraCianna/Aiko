@@ -1,8 +1,43 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createAikoAgentRuntime, extractAssistantText } from "../../src/main/agent/aikoAgentRuntime";
+import { AIKO_CHAT_TEMPERATURE, createAikoAgentRuntime, extractAssistantText } from "../../src/main/agent/aikoAgentRuntime";
+import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
 import type { ChatPayload } from "../../src/shared/chatPayload";
 
+describe("Aiko persona prompt", () => {
+  it("loads the persona prompt from 人物设定.md", () => {
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "aiko-persona-"));
+    fs.writeFileSync(path.join(rootDir, "人物设定.md"), "# Aiko\n\n她是安静但敏锐的桌面伙伴.", "utf8");
+
+    expect(loadAikoPersonaPrompt(rootDir)).toContain("安静但敏锐");
+  });
+
+  it("builds a system prompt with persona and safety boundaries", () => {
+    const prompt = buildAikoSystemPrompt("Aiko 是有一点俏皮但不过度打扰用户的桌宠.");
+
+    expect(prompt).toContain("有一点俏皮");
+    expect(prompt).toContain("不能直接执行系统操作");
+    expect(prompt).toContain("待确认动作");
+  });
+
+  it("adds anti-hallucination rules without removing Aiko's personality", () => {
+    const prompt = buildAikoSystemPrompt("Aiko 说话温和,敏锐,偶尔有一点轻松的俏皮感.");
+
+    expect(prompt).toContain("事实来源优先级");
+    expect(prompt).toContain("没有可靠来源时");
+    expect(prompt).toContain("不要编造");
+    expect(prompt).toContain("不要为了显得安全而变成冷冰冰的客服腔");
+    expect(prompt).toContain("温和,敏锐");
+  });
+});
+
 describe("createAikoAgentRuntime", () => {
+  it("keeps the default chat model temperature low enough for a local assistant", () => {
+    expect(AIKO_CHAT_TEMPERATURE).toBeLessThanOrEqual(0.3);
+  });
+
   it("proposes low-risk application actions without calling the model", async () => {
     let invoked = false;
     const runtime = createAikoAgentRuntime({
@@ -18,7 +53,7 @@ describe("createAikoAgentRuntime", () => {
 
     expect(invoked).toBe(false);
     expect(response.pendingAction).toEqual({
-      title: "打开应用：VS Code",
+      title: "打开应用:VS Code",
       source: "打开 VS Code",
       risk: "low",
       capability: "open_application",
@@ -33,7 +68,7 @@ describe("createAikoAgentRuntime", () => {
           return {
             messages: [
               { role: "user", content: "帮我规划今晚的学习安排" },
-              { role: "assistant", content: "先处理最重要的一项，再安排复习和休息。" }
+              { role: "assistant", content: "先处理最重要的一项,再安排复习和休息." }
             ]
           };
         }
@@ -42,7 +77,7 @@ describe("createAikoAgentRuntime", () => {
 
     const response = await runtime.respond(textPayload("帮我规划今晚的学习安排"));
 
-    expect(response).toEqual({ message: "先处理最重要的一项，再安排复习和休息。" });
+    expect(response).toEqual({ message: "先处理最重要的一项,再安排复习和休息." });
   });
 
   it("uses speech understanding transcripts for deterministic local actions", async () => {
@@ -97,7 +132,7 @@ describe("createAikoAgentRuntime", () => {
         async invoke(input) {
           invokeInput = JSON.stringify(input);
           return {
-            messages: [{ role: "assistant", content: "那就安排轻一点。" }]
+            messages: [{ role: "assistant", content: "那就安排轻量一点." }]
           };
         }
       }
@@ -108,7 +143,7 @@ describe("createAikoAgentRuntime", () => {
       attachments: [audioAttachment()]
     });
 
-    expect(response.message).toBe("那就安排轻一点。");
+    expect(response.message).toBe("那就安排轻量一点.");
     expect(invokeInput).toContain("语音理解");
     expect(invokeInput).toContain("我今天想轻松一点安排学习");
   });
@@ -134,7 +169,7 @@ describe("createAikoAgentRuntime", () => {
         async invoke(input) {
           invokeInput = JSON.stringify(input);
           return {
-            messages: [{ role: "assistant", content: "那我会先安排轻量复习。" }]
+            messages: [{ role: "assistant", content: "那我会先安排轻量复习." }]
           };
         }
       }
@@ -142,9 +177,34 @@ describe("createAikoAgentRuntime", () => {
 
     const response = await runtime.respond(textPayload("帮我安排今晚学习"));
 
-    expect(response.message).toBe("那我会先安排轻量复习。");
+    expect(response.message).toBe("那我会先安排轻量复习.");
     expect(invokeInput).toContain("长期记忆");
+    expect(invokeInput).toContain("只作为偏好参考");
+    expect(invokeInput).toContain("当前输入优先");
     expect(invokeInput).toContain("用户喜欢晚上学习时先做轻量复习");
+  });
+
+  it("tells the model not to infer speech content when speech understanding fails", async () => {
+    let invokeInput = "";
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke(input) {
+          invokeInput = JSON.stringify(input);
+          return {
+            messages: [{ role: "assistant", content: "我现在还不能可靠理解这段语音." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond({
+      text: "",
+      attachments: [audioAttachment()]
+    });
+
+    expect(invokeInput).toContain("语音理解");
+    expect(invokeInput).toContain("不要假装已经理解语音内容");
+    expect(invokeInput).toContain("provider 尚未配置");
   });
 
   it("stores accepted memory candidates after an agent response", async () => {
@@ -169,7 +229,7 @@ describe("createAikoAgentRuntime", () => {
       agent: {
         async invoke() {
           return {
-            messages: [{ role: "assistant", content: "我记住这个偏好了。" }]
+            messages: [{ role: "assistant", content: "我记住这个偏好了." }]
           };
         }
       }
@@ -193,14 +253,14 @@ describe("createAikoAgentRuntime", () => {
       agent: {
         async invoke() {
           return {
-            messages: [{ role: "assistant", content: "先这样安排。" }]
+            messages: [{ role: "assistant", content: "先这样安排." }]
           };
         }
       }
     });
 
     await expect(runtime.respond(textPayload("帮我安排今晚学习"))).resolves.toEqual({
-      message: "先这样安排。"
+      message: "先这样安排."
     });
   });
 
@@ -220,18 +280,18 @@ describe("createAikoAgentRuntime", () => {
       agent: {
         async invoke() {
           return {
-            messages: [{ role: "assistant", content: "我先记在当前对话里。" }]
+            messages: [{ role: "assistant", content: "我先记在当前对话里." }]
           };
         }
       }
     });
 
     await expect(runtime.respond(textPayload("以后叫我 Sakura"))).resolves.toEqual({
-      message: "我先记在当前对话里。"
+      message: "我先记在当前对话里."
     });
   });
 
-  it("can use repository-level memory dedupe across repeated agent responses", async () => {
+  it("deduplicates extracted memory candidates before storing", async () => {
     const stored = new Map<string, number>();
     const runtime = createAikoAgentRuntime({
       memoryRuntime: {
@@ -260,7 +320,7 @@ describe("createAikoAgentRuntime", () => {
       agent: {
         async invoke() {
           return {
-            messages: [{ role: "assistant", content: "我会这样称呼你。" }]
+            messages: [{ role: "assistant", content: "我会这样称呼你." }]
           };
         }
       }
@@ -284,6 +344,7 @@ describe("createAikoAgentRuntime", () => {
 
     expect(response.message).toContain("我现在连不上大模型");
   });
+
   it("streams assistant deltas when the injected LangChain agent supports streaming", async () => {
     const deltas: string[] = [];
     const runtime = createAikoAgentRuntime({
@@ -293,15 +354,15 @@ describe("createAikoAgentRuntime", () => {
         },
         async *stream() {
           yield { messages: [{ role: "assistant", content: "好的" }] };
-          yield { messages: [{ role: "assistant", content: "好的，我来安排。" }] };
+          yield { messages: [{ role: "assistant", content: "好的,我来安排." }] };
         }
       }
     });
 
     const response = await runtime.respondStream(textPayload("帮我安排今天"), (delta) => deltas.push(delta));
 
-    expect(response).toEqual({ message: "好的，我来安排。" });
-    expect(deltas).toEqual(["好的", "，我来安排。"]);
+    expect(response).toEqual({ message: "好的,我来安排." });
+    expect(deltas).toEqual(["好的", ",我来安排."]);
   });
 
   it("proposes deterministic web search actions", async () => {

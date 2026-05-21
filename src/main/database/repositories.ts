@@ -4,10 +4,12 @@ import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
 import type { Reminder } from "../reminders/reminderService";
 
+// 返回当前时间的 ISO 字符串.
 export function nowIso() {
   return new Date().toISOString();
 }
 
+// 根据前缀创建带命名空间的随机 ID.
 export function createId(prefix: string) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
@@ -37,8 +39,10 @@ type MemoryCandidateRow = {
   created_at: string;
 };
 
+// 创建长期记忆仓储, 负责候选记忆和已接受记忆的读写.
 export function createMemoryRepository(db: DatabaseSync) {
   return {
+    // 保存一个记忆候选, 如果已接受则同步写入长期记忆.
     rememberCandidate(candidate: MemoryCandidate, status: MemoryStatus) {
       const candidateId = createId("memory_candidate");
       db.prepare(
@@ -72,6 +76,7 @@ export function createMemoryRepository(db: DatabaseSync) {
       return { candidateId, memoryId };
     },
 
+    // 根据查询文本召回相关长期记忆.
     recall(query: string, limit = 5): RecalledMemory[] {
       const rows = listAcceptedMemoryRows(db).map((row) => ({
         id: row.id,
@@ -82,16 +87,19 @@ export function createMemoryRepository(db: DatabaseSync) {
       return recallMemories(rows, query, limit);
     },
 
+    // 列出全部记忆候选.
     listCandidates() {
       return listCandidateRows(db).map(mapMemoryCandidateRow);
     },
 
+    // 列出等待用户确认的记忆候选.
     listPendingCandidates() {
       return listCandidateRows(db)
         .filter((row) => row.status === "pending_confirmation")
         .map(mapMemoryCandidateRow);
     },
 
+    // 列出已接受的长期记忆.
     listMemories() {
       return listAcceptedMemoryRows(db).map((row) => ({
         id: row.id,
@@ -105,6 +113,7 @@ export function createMemoryRepository(db: DatabaseSync) {
       }));
     },
 
+    // 接受一个待确认记忆候选并提升为长期记忆.
     acceptCandidate(candidateId: string) {
       const row = getCandidateRow(db, candidateId);
       if (!row) return false;
@@ -119,6 +128,7 @@ export function createMemoryRepository(db: DatabaseSync) {
       return true;
     },
 
+    // 拒绝一个待确认记忆候选.
     rejectCandidate(candidateId: string) {
       const result = db.prepare("UPDATE memory_candidates SET status = ? WHERE id = ?").run("rejected", candidateId);
       return result.changes > 0;
@@ -126,6 +136,7 @@ export function createMemoryRepository(db: DatabaseSync) {
   };
 }
 
+// 写入已接受记忆, 已存在同类内容时更新置信度.
 function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): string {
   const normalizedContent = normalizeMemoryContent(candidate.content);
   const duplicate = listAcceptedMemoryRows(db).find(
@@ -164,6 +175,7 @@ function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): str
   return memoryId;
 }
 
+// 读取所有已接受记忆行.
 function listAcceptedMemoryRows(db: DatabaseSync): MemoryRow[] {
   return db
     .prepare(
@@ -177,6 +189,7 @@ function listAcceptedMemoryRows(db: DatabaseSync): MemoryRow[] {
     .all() as MemoryRow[];
 }
 
+// 读取所有记忆候选行.
 function listCandidateRows(db: DatabaseSync): MemoryCandidateRow[] {
   return db
     .prepare(
@@ -189,6 +202,7 @@ function listCandidateRows(db: DatabaseSync): MemoryCandidateRow[] {
     .all() as MemoryCandidateRow[];
 }
 
+// 根据 ID 查询单个记忆候选.
 function getCandidateRow(db: DatabaseSync, candidateId: string): MemoryCandidateRow | null {
   const row = db
     .prepare(
@@ -204,6 +218,7 @@ function getCandidateRow(db: DatabaseSync, candidateId: string): MemoryCandidate
   return row ?? null;
 }
 
+// 把数据库行转换成前端可用的记忆候选对象.
 function mapMemoryCandidateRow(row: MemoryCandidateRow) {
   return {
     id: row.id,
@@ -216,12 +231,15 @@ function mapMemoryCandidateRow(row: MemoryCandidateRow) {
   };
 }
 
+// 归一化记忆内容, 用于去重.
 function normalizeMemoryContent(content: string) {
   return content.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+// 创建权限仓储, 负责记住和查询用户授权规则.
 export function createPermissionRepository(db: DatabaseSync) {
   return {
+    // 记住一个非高风险权限规则.
     remember(rule: PermissionRule) {
       if (rule.risk === "high") return;
 
@@ -246,6 +264,7 @@ export function createPermissionRepository(db: DatabaseSync) {
       ).run(permissionId(rule.capability, normalizedTarget), rule.capability, normalizedTarget, rule.risk, "remembered", nowIso());
     },
 
+    // 判断某个权限规则是否仍然有效.
     has(rule: Pick<PermissionRule, "capability" | "target">) {
       const row = db
         .prepare(
@@ -261,6 +280,7 @@ export function createPermissionRepository(db: DatabaseSync) {
       return Boolean(row);
     },
 
+    // 列出所有未撤销的权限规则.
     list(): PermissionRule[] {
       const rows = db
         .prepare(
@@ -282,8 +302,10 @@ export function createPermissionRepository(db: DatabaseSync) {
   };
 }
 
+// 创建提醒仓储, 负责保存和列出提醒.
 export function createReminderRepository(db: DatabaseSync) {
   return {
+    // 保存或更新一个提醒.
     save(reminder: Reminder) {
       db.prepare(
         `
@@ -305,6 +327,7 @@ export function createReminderRepository(db: DatabaseSync) {
       ).run(reminder.id, reminder.title, reminder.triggerAt, reminder.status, nowIso());
     },
 
+    // 按触发时间列出提醒.
     list(): Reminder[] {
       const rows = db
         .prepare(
@@ -326,10 +349,12 @@ export function createReminderRepository(db: DatabaseSync) {
   };
 }
 
+// 归一化权限目标, 用于稳定匹配.
 function normalizeTarget(target: string) {
   return target.trim().toLowerCase();
 }
 
+// 根据能力和目标生成权限主键.
 function permissionId(capability: string, target: string) {
   return `permission:${capability}:${target}`;
 }

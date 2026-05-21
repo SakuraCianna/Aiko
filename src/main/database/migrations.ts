@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
+// 创建当前版本需要的数据库表结构.
 export function runMigrations(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS memories (

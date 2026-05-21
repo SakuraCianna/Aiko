@@ -4,7 +4,7 @@ import { MAX_IMAGE_BYTES, validateChatPayload } from "../../src/shared/chatPaylo
 describe("validateChatPayload", () => {
   it("accepts text with image and audio attachments", () => {
     const payload = validateChatPayload({
-      text: "看看这张图，再听一下这个声音。",
+      text: "看看这张图,再听一下这个声音.",
       attachments: [
         {
           id: "image-1",
@@ -25,7 +25,7 @@ describe("validateChatPayload", () => {
       ]
     });
 
-    expect(payload.text).toBe("看看这张图，再听一下这个声音。");
+    expect(payload.text).toBe("看看这张图,再听一下这个声音.");
     expect(payload.attachments).toHaveLength(2);
   });
 

@@ -8,6 +8,7 @@ export type AikoDatabase = {
   close: () => void;
 };
 
+// 打开 Aiko 本地数据库, 并在启动时执行迁移.
 export function openDatabase(): AikoDatabase {
   const dbPath = path.join(app.getPath("userData"), "aiko.db");
   const db = new DatabaseSync(dbPath, {
@@ -18,6 +19,7 @@ export function openDatabase(): AikoDatabase {
 
   return {
     db,
+    // 关闭底层 SQLite 连接.
     close() {
       db.close();
     }

@@ -10,6 +10,7 @@ type WorkAreaSize = {
   height: number;
 };
 
+// 根据屏幕工作区创建桌宠窗口配置.
 export function createPetWindowOptions(
   preloadPath: string,
   workAreaSize: WorkAreaSize
