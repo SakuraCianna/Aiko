@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { recallMemories, type RecalledMemory } from "../memory/memoryRecall";
+import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
 import type { Reminder } from "../reminders/reminderService";
 
@@ -12,6 +14,211 @@ export function createId(prefix: string) {
 
 export type PermissionRepository = ReturnType<typeof createPermissionRepository>;
 export type ReminderRepository = ReturnType<typeof createReminderRepository>;
+export type MemoryRepository = ReturnType<typeof createMemoryRepository>;
+
+type MemoryRow = {
+  id: string;
+  type: MemoryCandidate["type"];
+  content: string;
+  confidence: number;
+  status: MemoryStatus;
+  created_at: string;
+  updated_at: string;
+  last_used_at: string | null;
+};
+
+type MemoryCandidateRow = {
+  id: string;
+  type: MemoryCandidate["type"];
+  content: string;
+  confidence: number;
+  requires_confirmation: 0 | 1;
+  status: MemoryStatus;
+  created_at: string;
+};
+
+export function createMemoryRepository(db: DatabaseSync) {
+  return {
+    rememberCandidate(candidate: MemoryCandidate, status: MemoryStatus) {
+      const candidateId = createId("memory_candidate");
+      db.prepare(
+        `
+        INSERT INTO memory_candidates (
+          id,
+          type,
+          content,
+          confidence,
+          requires_confirmation,
+          status,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+      ).run(
+        candidateId,
+        candidate.type,
+        candidate.content,
+        candidate.confidence,
+        candidate.requiresConfirmation ? 1 : 0,
+        status,
+        nowIso()
+      );
+
+      let memoryId: string | null = null;
+      if (status === "accepted") {
+        memoryId = upsertAcceptedMemory(db, candidate);
+      }
+
+      return { candidateId, memoryId };
+    },
+
+    recall(query: string, limit = 5): RecalledMemory[] {
+      const rows = listAcceptedMemoryRows(db).map((row) => ({
+        id: row.id,
+        type: row.type,
+        content: row.content
+      }));
+
+      return recallMemories(rows, query, limit);
+    },
+
+    listCandidates() {
+      return listCandidateRows(db).map(mapMemoryCandidateRow);
+    },
+
+    listPendingCandidates() {
+      return listCandidateRows(db)
+        .filter((row) => row.status === "pending_confirmation")
+        .map(mapMemoryCandidateRow);
+    },
+
+    listMemories() {
+      return listAcceptedMemoryRows(db).map((row) => ({
+        id: row.id,
+        type: row.type,
+        content: row.content,
+        confidence: row.confidence,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        lastUsedAt: row.last_used_at
+      }));
+    },
+
+    acceptCandidate(candidateId: string) {
+      const row = getCandidateRow(db, candidateId);
+      if (!row) return false;
+
+      db.prepare("UPDATE memory_candidates SET status = ? WHERE id = ?").run("accepted", candidateId);
+      upsertAcceptedMemory(db, {
+        type: row.type,
+        content: row.content,
+        confidence: row.confidence,
+        requiresConfirmation: Boolean(row.requires_confirmation)
+      });
+      return true;
+    },
+
+    rejectCandidate(candidateId: string) {
+      const result = db.prepare("UPDATE memory_candidates SET status = ? WHERE id = ?").run("rejected", candidateId);
+      return result.changes > 0;
+    }
+  };
+}
+
+function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): string {
+  const normalizedContent = normalizeMemoryContent(candidate.content);
+  const duplicate = listAcceptedMemoryRows(db).find(
+    (row) => row.type === candidate.type && normalizeMemoryContent(row.content) === normalizedContent
+  );
+
+  if (duplicate) {
+    db.prepare(
+      `
+      UPDATE memories
+      SET confidence = ?,
+          updated_at = ?
+      WHERE id = ?
+    `
+    ).run(Math.max(duplicate.confidence, candidate.confidence), nowIso(), duplicate.id);
+    return duplicate.id;
+  }
+
+  const memoryId = createId("memory");
+  const timestamp = nowIso();
+  db.prepare(
+    `
+    INSERT INTO memories (
+      id,
+      type,
+      content,
+      confidence,
+      status,
+      created_at,
+      updated_at,
+      last_used_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+  `
+  ).run(memoryId, candidate.type, candidate.content.trim(), candidate.confidence, "accepted", timestamp, timestamp);
+  return memoryId;
+}
+
+function listAcceptedMemoryRows(db: DatabaseSync): MemoryRow[] {
+  return db
+    .prepare(
+      `
+      SELECT id, type, content, confidence, status, created_at, updated_at, last_used_at
+      FROM memories
+      WHERE status = 'accepted'
+      ORDER BY updated_at DESC, created_at DESC, rowid DESC
+    `
+    )
+    .all() as MemoryRow[];
+}
+
+function listCandidateRows(db: DatabaseSync): MemoryCandidateRow[] {
+  return db
+    .prepare(
+      `
+      SELECT id, type, content, confidence, requires_confirmation, status, created_at
+      FROM memory_candidates
+      ORDER BY rowid ASC
+    `
+    )
+    .all() as MemoryCandidateRow[];
+}
+
+function getCandidateRow(db: DatabaseSync, candidateId: string): MemoryCandidateRow | null {
+  const row = db
+    .prepare(
+      `
+      SELECT id, type, content, confidence, requires_confirmation, status, created_at
+      FROM memory_candidates
+      WHERE id = ?
+      LIMIT 1
+    `
+    )
+    .get(candidateId) as MemoryCandidateRow | undefined;
+
+  return row ?? null;
+}
+
+function mapMemoryCandidateRow(row: MemoryCandidateRow) {
+  return {
+    id: row.id,
+    type: row.type,
+    content: row.content,
+    confidence: row.confidence,
+    requiresConfirmation: Boolean(row.requires_confirmation),
+    status: row.status,
+    createdAt: row.created_at
+  };
+}
+
+function normalizeMemoryContent(content: string) {
+  return content.trim().replace(/\s+/g, " ").toLowerCase();
+}
 
 export function createPermissionRepository(db: DatabaseSync) {
   return {

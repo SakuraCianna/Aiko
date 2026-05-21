@@ -56,6 +56,23 @@ const attachmentSchema = z
         code: z.ZodIssueCode.custom,
         message: "Attachment data URL does not match MIME type"
       });
+      return;
+    }
+
+    const actualBytes = decodedBase64ByteLength(attachment.dataUrl.slice(`data:${attachment.mimeType};base64,`.length));
+    if (actualBytes === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attachment data URL is not valid base64"
+      });
+      return;
+    }
+
+    if (actualBytes > maxBytes || actualBytes !== attachment.size) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attachment size does not match encoded content"
+      });
     }
   });
 
@@ -87,4 +104,10 @@ export function isImageMimeType(mimeType: string): boolean {
 
 export function isAudioMimeType(mimeType: string): boolean {
   return (audioMimeTypes as readonly string[]).includes(mimeType);
+}
+
+function decodedBase64ByteLength(base64: string): number | null {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) return null;
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return (base64.length / 4) * 3 - padding;
 }

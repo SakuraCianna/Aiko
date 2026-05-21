@@ -51,6 +51,34 @@ describe("createActionExecutor", () => {
     ]);
   });
 
+  it("creates hour-based relative reminders", async () => {
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      now: () => new Date("2026-05-19T10:00:00.000Z")
+    });
+
+    const result = await executor.execute({
+      action: {
+        ...lowRiskAction("create_reminder", "喝水"),
+        params: { amount: 2, unit: "hours", title: "喝水" }
+      },
+      remember: false
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      message: "已创建提醒：喝水。"
+    });
+    expect(executor.listReminders()).toMatchObject([
+      {
+        title: "喝水",
+        triggerAt: "2026-05-19T12:00:00.000Z",
+        status: "active"
+      }
+    ]);
+  });
+
   it("rejects high-risk actions", async () => {
     const executor = createActionExecutor({
       openUrl: async () => undefined,

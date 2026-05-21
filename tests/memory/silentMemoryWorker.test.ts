@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { recallMemories } from "../../src/main/memory/memoryRecall";
 import { classifyMemoryCandidate } from "../../src/main/memory/silentMemoryWorker";
 
 describe("classifyMemoryCandidate", () => {
@@ -22,5 +23,28 @@ describe("classifyMemoryCandidate", () => {
         requiresConfirmation: true
       })
     ).toEqual("pending_confirmation");
+  });
+});
+
+describe("recallMemories", () => {
+  it("recalls Chinese memories from natural queries without spaces", () => {
+    expect(
+      recallMemories(
+        [
+          {
+            id: "memory_1",
+            type: "preference",
+            content: "用户喜欢晚上学习时先做轻量复习"
+          }
+        ],
+        "帮我安排今晚学习"
+      )
+    ).toEqual([
+      {
+        id: "memory_1",
+        type: "preference",
+        content: "用户喜欢晚上学习时先做轻量复习"
+      }
+    ]);
   });
 });

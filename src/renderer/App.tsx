@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatPayload } from "../shared/chatPayload";
 import type { PendingActionDto, PanelName } from "../shared/ipcTypes";
 import { ChatPanel } from "./components/ChatPanel";
@@ -17,17 +17,30 @@ export function App() {
   const [clickThrough, setClickThrough] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const hideControlsTimerRef = useRef<number | null>(null);
+  const activeStreamIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return window.aiko.onChatStreamDelta((delta) => {
+      if (delta.requestId !== activeStreamIdRef.current) return;
+      setMessage((current) => (current === "正在思考..." ? delta.text : `${current}${delta.text}`));
+      showControls();
+    });
+  }, []);
 
   async function handleCommand(payload: ChatPayload) {
-    setMessage("我听到了，正在处理。");
+    const requestId = crypto.randomUUID();
+    activeStreamIdRef.current = requestId;
+    setMessage("正在思考...");
     showControls();
 
     try {
-      const response = await window.aiko.sendMessage(payload);
+      const response = await window.aiko.streamMessage(requestId, payload);
+      activeStreamIdRef.current = null;
       setMessage(response.message);
       showControls();
       if (response.pendingAction) {
         setPendingAction({
+          id: response.pendingAction.id,
           title: response.pendingAction.title,
           source: response.pendingAction.source,
           risk: response.pendingAction.risk,
@@ -37,7 +50,8 @@ export function App() {
         });
       }
     } catch {
-      setMessage("我这边暂时没收到回复，但本地功能还在。");
+      activeStreamIdRef.current = null;
+      setMessage("我这边暂时没有收到回复，但本地功能还在。");
       showControls();
     }
   }
@@ -117,7 +131,7 @@ export function App() {
             <PanelShell activePanel={activePanel} onPanelChange={setActivePanel}>
               {activePanel === "chat" && <ChatPanel />}
               {activePanel === "reminders" && <ReminderPanel />}
-              {activePanel === "memory" && <MemoryPanel />}
+              {activePanel === "memory" && <MemoryPanel onStatus={setMessage} />}
               {activePanel === "settings" && <SettingsPanel />}
             </PanelShell>
           </div>

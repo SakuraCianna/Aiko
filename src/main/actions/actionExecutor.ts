@@ -49,7 +49,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
         const unit = action.params?.unit;
         const title = readStringParam(action.params, "title") || action.target;
 
-        if (!amount || unit !== "minutes") {
+        if (!amount || (unit !== "minutes" && unit !== "hours")) {
           return { ok: false, message: "这个提醒缺少有效的时间参数。" };
         }
 

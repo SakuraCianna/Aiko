@@ -3,6 +3,7 @@ import type { ChatPayload } from "./chatPayload";
 export type PanelName = "chat" | "reminders" | "memory" | "settings";
 
 export type PendingActionDto = {
+  id?: string;
   title: string;
   source: string;
   risk: "low" | "medium" | "high";
@@ -26,12 +27,48 @@ export type ChatResponse = {
   pendingAction?: PendingActionDto;
 };
 
+export type ChatStreamDelta = {
+  requestId: string;
+  text: string;
+};
+
+export type MemoryCandidateDto = {
+  id: string;
+  type: string;
+  content: string;
+  confidence: number;
+  requiresConfirmation: boolean;
+  status: string;
+  createdAt: string;
+};
+
+export type MemoryItemDto = {
+  id: string;
+  type: string;
+  content: string;
+  confidence: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+};
+
+export type MemorySnapshotDto = {
+  memories: MemoryItemDto[];
+  pendingCandidates: MemoryCandidateDto[];
+};
+
 export type AikoApi = {
   ping: () => Promise<{ ok: true; value: "pong" }>;
   setClickThrough: (enabled: boolean) => Promise<void>;
   openPanel: (panel: PanelName) => Promise<void>;
   sendMessage: (payload: ChatPayload) => Promise<ChatResponse>;
+  streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
+  onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
+  listMemory: () => Promise<MemorySnapshotDto>;
+  acceptMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
+  rejectMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
 };
 
 declare global {

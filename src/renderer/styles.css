@@ -275,6 +275,8 @@ button {
 
 .panel-body {
   padding: 16px;
+  height: calc(100% - 55px);
+  overflow: auto;
 }
 
 .panel-content {
@@ -292,4 +294,49 @@ button {
   border-radius: 8px;
   border: 1px solid rgba(73, 101, 126, 0.2);
   padding: 0 10px;
+}
+
+.panel-section {
+  display: grid;
+  gap: 10px;
+}
+
+.panel-section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.panel-muted {
+  margin: 0;
+  color: #667789;
+  font-size: 13px;
+}
+
+.memory-panel {
+  align-content: start;
+}
+
+.memory-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.96);
+}
+
+.memory-card p {
+  margin: 6px 0;
+}
+
+.memory-card span {
+  color: #667789;
+  font-size: 12px;
+}
+
+.memory-card-actions {
+  display: flex;
+  align-items: start;
+  gap: 8px;
 }

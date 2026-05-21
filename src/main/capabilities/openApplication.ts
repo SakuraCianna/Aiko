@@ -7,13 +7,18 @@ export type ApplicationConfig = {
 };
 
 export async function openApplication(apps: ApplicationConfig[], query: string): Promise<boolean> {
-  const normalized = query.toLowerCase();
+  const normalized = normalize(query);
   const match = apps.find((app) => {
-    return app.name.toLowerCase() === normalized || app.aliases.some((alias) => alias.toLowerCase() === normalized);
+    const names = [app.name, ...app.aliases].map(normalize);
+    return names.some((name) => name === normalized || name.includes(normalized) || normalized.includes(name));
   });
 
   if (!match) return false;
 
   const error = await shell.openPath(match.path);
   return error.length === 0;
+}
+
+function normalize(value: string): string {
+  return value.trim().toLowerCase();
 }

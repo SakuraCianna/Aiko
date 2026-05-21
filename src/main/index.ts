@@ -5,7 +5,7 @@ import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
 import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
-import { createPermissionRepository, createReminderRepository } from "./database/repositories";
+import { createMemoryRepository, createPermissionRepository, createReminderRepository } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
@@ -19,14 +19,22 @@ void app.whenReady().then(() => {
   const petWindow = createPetWindow(preloadPath);
   const panelWindow = createPanelWindow(preloadPath);
   const config = loadConfig();
-  const agentRuntime = createAikoAgentRuntime({ config });
   database = openDatabase();
+  const memoryRepository = createMemoryRepository(database.db);
+  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository });
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
 
   loadRenderer(petWindow, __dirname);
   loadRenderer(panelWindow, __dirname);
-  registerAikoHandlers({ agentRuntime, petWindow, panelWindow, permissionRepository, reminderRepository });
+  registerAikoHandlers({
+    agentRuntime,
+    petWindow,
+    panelWindow,
+    memoryRepository,
+    permissionRepository,
+    reminderRepository
+  });
 });
 
 app.on("window-all-closed", () => {

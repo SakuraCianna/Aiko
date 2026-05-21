@@ -8,10 +8,7 @@ import {
   type ChatAttachment,
   type ChatPayload
 } from "../../shared/chatPayload";
-import {
-  createAudioAttachmentFromBlob,
-  selectSupportedAudioMimeType
-} from "../audio/microphoneRecorder";
+import { createAudioAttachmentFromBlob, selectSupportedAudioMimeType } from "../audio/microphoneRecorder";
 
 type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;

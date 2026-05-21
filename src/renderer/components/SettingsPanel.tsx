@@ -6,8 +6,8 @@ export function SettingsPanel() {
         <input value="glm-4v-flash" readOnly />
       </label>
       <label>
-        实时语音
-        <input value="Realtime Voice Pipeline 预留" readOnly />
+        语音输入
+        <input value="语音理解 provider 预留，暂不接入真实 ASR" readOnly />
       </label>
     </section>
   );

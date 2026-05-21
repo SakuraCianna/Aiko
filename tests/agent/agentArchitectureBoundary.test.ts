@@ -37,6 +37,7 @@ describe("Aiko agent architecture boundary", () => {
 
     const doc = readFileSync(architectureDoc, "utf8");
     expect(doc).toContain("LangChain");
+    expect(doc).toContain("LangGraph-backed");
     expect(doc).toContain("src/main/agent/aikoAgentRuntime.ts");
     expect(doc).toContain("不要重新引入");
   });

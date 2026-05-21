@@ -11,7 +11,7 @@ describe("validateChatPayload", () => {
           kind: "image",
           name: "sample.png",
           mimeType: "image/png",
-          size: 12,
+          size: 3,
           dataUrl: "data:image/png;base64,AAAA"
         },
         {
@@ -19,7 +19,7 @@ describe("validateChatPayload", () => {
           kind: "audio",
           name: "voice.webm",
           mimeType: "audio/webm",
-          size: 12,
+          size: 3,
           dataUrl: "data:audio/webm;base64,AAAA"
         }
       ]
@@ -58,6 +58,24 @@ describe("validateChatPayload", () => {
             name: "huge.png",
             mimeType: "image/png",
             size: MAX_IMAGE_BYTES + 1,
+            dataUrl: "data:image/png;base64,AAAA"
+          }
+        ]
+      })
+    ).toThrow();
+  });
+
+  it("rejects attachments whose declared size does not match base64 content", () => {
+    expect(() =>
+      validateChatPayload({
+        text: "",
+        attachments: [
+          {
+            id: "spoofed-1",
+            kind: "image",
+            name: "spoofed.png",
+            mimeType: "image/png",
+            size: 1,
             dataUrl: "data:image/png;base64,AAAA"
           }
         ]

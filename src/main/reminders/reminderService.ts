@@ -8,12 +8,13 @@ export type Reminder = {
 export type RelativeReminderInput = {
   title: string;
   amount: number;
-  unit: "minutes";
+  unit: "minutes" | "hours";
   baseTime: Date;
 };
 
 export function createRelativeReminder(input: RelativeReminderInput): Reminder {
-  const triggerAt = new Date(input.baseTime.getTime() + input.amount * 60_000);
+  const multiplier = input.unit === "hours" ? 60 : 1;
+  const triggerAt = new Date(input.baseTime.getTime() + input.amount * multiplier * 60_000);
 
   return {
     id: `reminder_${crypto.randomUUID()}`,
