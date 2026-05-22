@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, type BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
@@ -15,6 +15,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = resolvePreloadPath(__dirname);
 let database: AikoDatabase | null = null;
 
+configureDevelopmentSessionData();
+
 void app.whenReady().then(() => {
   const petWindow = createPetWindow(preloadPath);
   const panelWindow = createPanelWindow(preloadPath);
@@ -27,6 +29,8 @@ void app.whenReady().then(() => {
 
   loadRenderer(petWindow, __dirname);
   loadRenderer(panelWindow, __dirname);
+  attachRendererDiagnostics("pet", petWindow);
+  attachRendererDiagnostics("panel", panelWindow);
   registerAikoHandlers({
     agentRuntime,
     petWindow,
@@ -45,3 +49,30 @@ app.on("before-quit", () => {
   database?.close();
   database = null;
 });
+
+// 开发模式下给 Chromium cache 使用独立目录, 避免多实例抢占 cache.
+function configureDevelopmentSessionData() {
+  if (app.isPackaged) return;
+  app.setPath("sessionData", path.join(app.getPath("temp"), `aiko-desktop-pet-session-${process.pid}`));
+}
+
+// 打印 renderer 侧错误, 方便定位 VRM 和 WebGL 加载失败.
+function attachRendererDiagnostics(name: string, win: BrowserWindow) {
+  win.webContents.on("console-message", (event) => {
+    const { level, lineNumber, message, sourceId } = event;
+    const line = `[renderer:${name}] ${message} (${sourceId}:${lineNumber})`;
+    if (level === "error") {
+      console.error(line);
+    } else if (level === "warning") {
+      console.warn(line);
+    } else {
+      console.log(line);
+    }
+  });
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
+    console.error(`[renderer:${name}] failed to load ${validatedUrl}: ${errorCode} ${errorDescription}`);
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer:${name}] render process gone: ${details.reason}`);
+  });
+}

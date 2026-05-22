@@ -1,38 +1,39 @@
 # Aiko Desktop Pet
 
-Aiko 是一个面向 Windows 的桌宠与本地助手原型.它使用 Electron + React 构建桌面窗口, 使用 LangChain v1 编排 Agent, 通过 GLM 兼容 API 调用大模型, 并提供本地记忆, 权限确认, 本地动作执行和后续 VRM 角色渲染扩展路线.
+Aiko 是一个面向 Windows 的本地桌宠助手原型。它不是 OpenClaw 那种大而全的系统级 Agent, 目前目标更明确: 做一个常驻桌面, 有二次元角色形象, 能对话, 有长期记忆, 能在用户确认后执行低风险 Windows 操作的本地助手。
 
-这个项目的目标不是做一个超大型 Agent, 而是做一个可控, 可追踪, 可长期陪伴的本地桌宠助手.
+当前项目重点是先把 Agent 基础, 权限边界, 记忆系统和桌宠 UI 跑稳。语音播放, ASR, voice cloning 和更高权限的 Windows 自动化会放到后续阶段。
 
-## 当前状态
+## 当前能做什么
 
-项目还处于早期开发阶段.当前重点是 Agent 地基和桌宠交互框架, 不是最终发行版.
+已经实现:
 
-已完成:
+- Electron 桌面窗口, 用于承载桌宠和输入控件。
+- React + TypeScript 渲染层。
+- VRM 角色渲染路线: Three.js + `@pixiv/three-vrm`。
+- LangChain Agent Runtime。
+- Planner / Retriever / Executor 三层 Agent 结构。
+- GLM OpenAI-compatible API 接入。
+- 文本聊天。
+- 图片附件入口。
+- 默认麦克风录音入口。
+- 本地长期记忆, 使用 Node 24 内置 `node:sqlite`。
+- 对话结束后的静默记忆候选提取。
+- 记忆面板, 可以查看, 接受或忽略待确认记忆。
+- 本地动作确认流, Agent 只提出动作, 不直接执行 Windows 操作。
+- 低风险动作: 打开应用, 打开 URL, 网页搜索, 创建相对时间提醒。
+- 授权记忆: 用户确认并选择记住后, 同类低风险动作后续可直接执行。
+- Agent Trace, 用于排查 Retriever, Planner, Executor 和模型调用链路。
 
-- Electron + React 桌宠窗口.
-- LangChain v1 Agent runtime.
-- GLM 兼容模型配置.
-- Planner / Retriever / Executor 三层 Agent 结构.
-- Tool Registry 工具元信息系统.
-- Node 24 `node:sqlite` 本地长期记忆.
-- 对话后静默抽取记忆候选.
-- 本地动作用户确认流程.
-- 常见命令的本地确定性处理, 例如打开应用, 打开 URL, 网页搜索, 相对时间提醒.
-- 图片输入入口.
-- 麦克风录音入口.
-- Agent Trace 调试记录.
-- VRM + Three.js + `@pixiv/three-vrm` 角色路线.
+暂未实现:
 
-暂未完成:
-
-- 真实 ASR 语音识别.
-- TTS 回复播放.
-- zero-shot voice cloning.
-- 高风险 Windows 操作.
-- Shell 命令执行.
-- 文件写入能力.
-- 多角色系统.
+- 真实 ASR 语音理解。
+- TTS 回复播放。
+- zero-shot voice cloning。
+- Shell 命令执行。
+- 文件写入和删除。
+- 高风险 Windows 自动化。
+- 多角色系统。
 
 ## 技术栈
 
@@ -40,7 +41,7 @@ Aiko 是一个面向 Windows 的桌宠与本地助手原型.它使用 Electron +
 - React
 - TypeScript
 - LangChain v1
-- GLM 兼容 API
+- GLM OpenAI-compatible API
 - Node 24 `node:sqlite`
 - Three.js
 - `@pixiv/three-vrm`
@@ -51,11 +52,11 @@ Aiko 是一个面向 Windows 的桌宠与本地助手原型.它使用 Electron +
 - Windows
 - Node.js 24 或更高版本
 - npm
-- GLM 兼容 API Key
+- GLM API Key
 
-项目当前使用 Node 24 内置的 `node:sqlite`, 所以建议直接使用 Node 24.
+项目使用 Node 24 内置的 `node:sqlite`, 所以不要降到旧 Node 版本。
 
-## 安装
+## 快速启动
 
 安装依赖:
 
@@ -63,23 +64,19 @@ Aiko 是一个面向 Windows 的桌宠与本地助手原型.它使用 Electron +
 npm install
 ```
 
-复制环境变量文件:
+准备环境变量:
 
 ```bash
 copy .env.example .env
 ```
 
-配置 `.env`:
+`.env` 示例:
 
 ```env
 GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 GLM_MODEL=glm-4v-flash
 GLM_API_KEY=replace-with-your-api-key
 ```
-
-不要提交 `.env`.这里面应该放你自己的 API Key.
-
-## 开发命令
 
 启动开发模式:
 
@@ -87,54 +84,98 @@ GLM_API_KEY=replace-with-your-api-key
 npm run dev
 ```
 
-类型检查:
+常用检查:
 
 ```bash
 npm run typecheck
-```
-
-运行测试:
-
-```bash
 npm test
+npm run build
 ```
 
-构建:
+## 项目结构
 
-```bash
-npm run build
+```text
+assets/vrm/Aiko.vrm                 默认 VRM 测试模型
+src/main/index.ts                   Electron 主进程入口
+src/main/ipc/handlers.ts            Renderer 和主进程之间的 IPC 边界
+src/main/agent/aikoAgentRuntime.ts  LangChain Agent Runtime
+src/main/agent/retriever/           记忆, 附件, 语音上下文和工具提示整理
+src/main/agent/planner/             意图判断和计划生成
+src/main/agent/executor/            把计划转换成待确认动作或阻断结果
+src/main/actions/                   本地动作执行器
+src/main/memory/                    记忆候选提取和分类
+src/main/database/                  SQLite 数据库和 Repository
+src/renderer/App.tsx                桌宠主界面
+src/renderer/components/            输入框, 面板, 确认框等 UI 组件
+src/renderer/character/             VRM 角色渲染器
+人物设定.md                         Aiko 的角色人格和提示词设定
+人物UI.md                           角色 UI 和人物模型路线说明
 ```
 
 ## Agent 架构
 
-当前主链路:
+Aiko 的 Agent 不是让模型直接接管电脑。当前链路是:
 
 ```text
 Renderer
-  -> IPC handler
+  -> IPC Handler
   -> AikoAgentRuntime
   -> Retriever
   -> Planner
   -> Executor
   -> LangChain Agent
-  -> Memory candidate extraction
+  -> Pending Action
+  -> User Confirmation
+  -> Local Action Executor
 ```
 
-核心边界:
+关键规则:
 
-- `src/main/agent/aikoAgentRuntime.ts`: Agent 总编排和 LangChain 边界.
-- `src/main/agent/retriever`: 召回记忆, 整理附件, 语音上下文和工具提示.
-- `src/main/agent/planner`: 判断用户意图, 生成结构化计划.
-- `src/main/agent/executor`: 把计划转换为待确认动作或阻断结果.
-- `src/main/agent/tools`: 工具注册表和工具元信息.
-- `src/main/agent/trace`: Agent 请求 trace.
-- `src/main/actions`: 已确认本地动作执行.
-- `src/main/permissions`: 权限记忆和确认策略.
-- `src/main/memory`: 记忆召回, 记忆候选抽取和分类.
+- Renderer 只负责交互, 不直接执行本地能力。
+- IPC Handler 是主进程能力入口, 负责输入校验和动作确认。
+- Retriever 负责整理上下文, 例如长期记忆, 图片摘要, 语音识别结果和工具提示。
+- Planner 先尝试用确定性逻辑识别简单命令, 比如打开应用和创建提醒。
+- Executor 只生成待确认动作或阻断结果。
+- LangChain tools 只能生成待确认动作, 不能直接执行 Windows 操作。
+- 真正执行本地动作只能走 `src/main/actions/actionExecutor.ts`。
 
-LangChain tools 只能生成待确认动作, 不能直接执行 Windows 操作.
+这个结构是为了减少幻觉带来的误执行风险。模型可以建议, 但不能越过权限层。
 
-## 如何自定义助手性格
+## 如何自定义角色模型
+
+默认模型路径:
+
+```text
+assets/vrm/Aiko.vrm
+```
+
+代码默认读取:
+
+```text
+src/renderer/components/PetStage.tsx
+```
+
+当前默认配置:
+
+```ts
+const AIKO_VRM_PATH = "assets/vrm/Aiko.vrm";
+```
+
+替换模型的方法:
+
+1. 用 VRoid Studio 或其他工具导出 `.vrm` 文件。
+2. 把模型放到 `assets/vrm/`。
+3. 如果文件名仍然是 `Aiko.vrm`, 不需要改代码。
+4. 如果文件名不同, 修改 `src/renderer/components/PetStage.tsx` 里的 `AIKO_VRM_PATH`。
+5. 运行 `npm run dev` 查看效果。
+
+注意:
+
+- VRM 模型会通过 `/assets/...` 在开发和构建产物里访问。
+- 如果模型太大, 启动和首次加载会变慢。
+- 当前只有基础 idle, lookAt, expression 和口型接口, 还不是完整 VTuber 动作系统。
+
+## 如何自定义角色性格
 
 主要文件:
 
@@ -142,90 +183,23 @@ LangChain tools 只能生成待确认动作, 不能直接执行 Windows 操作.
 人物设定.md
 ```
 
-这里定义 Aiko 的人格, 说话方式, 行为边界和陪伴感.你可以修改它来定制自己的助手.
+这里定义 Aiko 的人格, 说话方式, 行为边界和陪伴感。代码会在 `src/main/ai/prompts.ts` 里读取这个文件, 再和安全约束, 反幻觉规则一起组成 system prompt。
 
-建议配置内容:
+建议写清楚:
 
-- 名字和称呼方式.
-- 性格关键词.
-- 说话语气.
-- 是否主动提醒.
-- 对用户的关系定位.
-- 不应该做的事情.
-- 面对不确定信息时如何回答.
-- 面对用户情绪时如何回应.
+- Aiko 如何称呼用户。
+- Aiko 的性格关键词。
+- Aiko 的说话节奏和语气。
+- 她可以主动做什么。
+- 她不能主动做什么。
+- 不确定时如何表达。
+- 面对用户情绪时如何回应。
+- 什么时候应该询问确认。
+- 什么时候应该拒绝或降级。
 
-代码入口:
-
-```text
-src/main/ai/prompts.ts
-```
-
-这个文件会读取 `人物设定.md`, 再合并安全约束和反幻觉规则生成 system prompt.
-
-建议原则:
-
-- 性格可以鲜明, 但不要让她编造事实.
-- 可以有陪伴感, 但不要过度打扰用户.
-- 可以有二次元角色感, 但不要牺牲可靠性.
-- 重要信息不确定时, 应该说明不确定.
-
-## 如何自定义助手立绘和人物模型
-
-当前项目的角色方向是:
-
-```text
-VRM + Three.js + @pixiv/three-vrm
-```
-
-推荐流程:
-
-1. 使用 VRoid Studio 创建自己的二次元角色.
-2. 导出 `.vrm` 模型文件.
-3. 将模型放入项目资源目录, 例如 `assets/vrm`.
-4. 在角色渲染配置中指向新的 VRM 文件.
-5. 根据模型比例调整窗口尺寸, 相机位置和交互区域.
-
-相关目录:
-
-```text
-assets/
-src/renderer/character/
-```
-
-相关文档:
-
-```text
-人物UI.md
-```
-
-可自定义方向:
-
-- 角色模型.
-- 角色表情.
-- 角色待机动作.
-- 鼠标悬停交互.
-- 输入框出现方式.
-- 桌宠窗口大小.
-- 是否置顶.
-- 是否点击穿透.
-
-注意:
-
-- 当前仍是角色渲染基础阶段, 不是完整 VTuber 系统.
-- Live2D 路线已经不是优先路线.
-- 如果模型文件很大, 会影响启动速度和渲染性能.
+当前目标是让 Aiko 有独立性格, 但不能为了角色感编造事实。
 
 ## 如何自定义记忆系统
-
-Aiko 的记忆系统是本地长期记忆.当前流程:
-
-1. 用户与 Aiko 对话.
-2. 回复完成后, 后台静默抽取记忆候选.
-3. 记忆候选被分类.
-4. 可自动接受或进入待确认.
-5. 后续对话前, Retriever 会召回相关记忆.
-6. 模型只把记忆当作偏好参考, 不把它当作实时事实.
 
 相关代码:
 
@@ -233,187 +207,112 @@ Aiko 的记忆系统是本地长期记忆.当前流程:
 src/main/memory/
 src/main/database/
 src/main/agent/retriever/
+src/renderer/components/MemoryPanel.tsx
 ```
 
-你可以自定义:
+当前流程:
 
-- 哪些内容应该进入长期记忆.
-- 哪些记忆需要用户确认.
-- 记忆分类.
-- 记忆召回数量.
-- 记忆匹配规则.
-- 记忆过期策略.
-- 记忆 UI 展示方式.
+1. 用户和 Aiko 对话。
+2. 回复完成后, 后台静默提取可能有价值的记忆候选。
+3. 记忆候选会被分类。
+4. 低风险记忆可以进入长期记忆, 需要确认的内容进入待确认列表。
+5. 后续对话前, Retriever 根据用户输入召回相关记忆。
+6. 模型只能把记忆当成偏好和背景参考, 不能把它当成实时事实。
 
-当前建议的记忆类型:
+适合放进长期记忆的内容:
 
-- Profile Memory: 用户长期偏好, 例如称呼, 工作习惯, 常用软件.
-- Relationship Memory: Aiko 和用户之间形成的互动习惯.
-- Project Memory: 当前项目和任务上下文.
-- Episodic Memory: 最近发生过的重要事件.
+- 用户希望 Aiko 如何称呼自己。
+- 用户长期偏好。
+- 用户常用软件。
+- 用户项目背景。
+- 用户明确表达过的稳定习惯。
 
-重要原则:
+不适合直接写入的内容:
 
-- 当前输入优先于长期记忆.
-- 记忆不能当作实时事实.
-- 不确定的记忆应该等待用户确认.
-- 用户应该可以查看, 接受, 拒绝和删除记忆.
+- 一次性的临时情绪。
+- 未确认的敏感信息。
+- 模型猜测出来的事实。
+- 和当前任务无关的隐私内容。
 
-## 如何自定义模型配置
+## 如何扩展本地能力
 
-主要配置文件:
+新增一个本地能力时, 按这个顺序做:
 
-```text
-.env
-```
+1. 在 `src/main/agent/tools/toolRegistry.ts` 增加工具元信息。
+2. 在 `src/main/agent/planner/aikoPlanner.ts` 决定什么时候生成计划。
+3. 在 `src/main/agent/executor/aikoExecutor.ts` 把计划转换成待确认动作。
+4. 在 `src/main/actions/actionExecutor.ts` 实现真正的本地执行。
+5. 在权限系统里定义风险等级和授权策略。
+6. 增加测试。
 
-示例:
+风险分层建议:
 
-```env
-GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-GLM_MODEL=glm-4v-flash
-GLM_API_KEY=replace-with-your-api-key
-```
+- `low`: 打开应用, 打开 URL, 创建普通提醒。
+- `medium`: 读取剪贴板, 截图, 读取用户明确指定的文件。
+- `high`: 写文件, 删除文件, 执行命令。
+- `critical`: 批量文件操作, 系统设置修改, 高权限自动化。
 
-相关代码:
+当前版本默认只开放低风险能力。高风险动作先不要直接接入执行链路。
 
-```text
-src/main/config/env.ts
-src/main/agent/aikoAgentRuntime.ts
-```
-
-当前使用 `@langchain/openai` 的 OpenAI-compatible 接入方式连接 GLM.后续如果要换模型, 推荐先抽象 Model Adapter, 不要把 provider SDK 调用散落到业务逻辑里.
-
-## 如何自定义工具和本地能力
-
-工具注册表:
-
-```text
-src/main/agent/tools/toolRegistry.ts
-```
-
-Planner:
-
-```text
-src/main/agent/planner/aikoPlanner.ts
-```
-
-执行器:
-
-```text
-src/main/actions/actionExecutor.ts
-src/main/agent/executor/aikoExecutor.ts
-```
-
-添加新能力时建议流程:
-
-1. 在 Tool Registry 里添加工具元信息.
-2. 在 Planner 中决定什么时候生成计划.
-3. 在 Executor 中把计划转换为待确认动作.
-4. 在 ActionExecutor 中实现真正的本地动作.
-5. 在权限系统中定义风险等级和确认策略.
-6. 添加测试.
-
-风险等级建议:
-
-- `low`: 打开应用, 打开 URL, 创建普通提醒.
-- `medium`: 读取剪贴板, 截图, 读取用户明确指定的文件.
-- `high`: 写文件, 删除文件, 执行命令.
-- `critical`: 系统设置修改, 批量文件操作, 高权限自动化.
-
-当前版本高风险操作默认不执行.
-
-## 如何自定义权限策略
-
-相关代码:
-
-```text
-src/main/permissions/
-src/main/actions/actionExecutor.ts
-```
-
-当前策略:
-
-1. Agent 只能生成待确认动作.
-2. 未授权动作需要用户确认.
-3. 用户可以选择记住某个能力和目标.
-4. 已记住的低风险动作后续可直接执行.
-5. 高风险动作当前直接阻断.
-
-适合扩展的方向:
-
-- 按能力设置默认风险等级.
-- 按目标设置记住授权.
-- 给授权规则增加过期时间.
-- 增加开发者调试面板.
-- 对文件和命令类能力增加更严格的白名单.
-
-## 如何自定义 UI
-
-主要渲染代码:
-
-```text
-src/renderer/
-```
-
-常见入口:
-
-```text
-src/renderer/App.tsx
-src/renderer/components/
-src/renderer/character/
-```
-
-可自定义:
-
-- 桌宠窗口大小.
-- 输入框显示方式.
-- 设置按钮和面板.
-- 聊天面板.
-- 记忆面板.
-- 提醒面板.
-- 角色区域布局.
-- 鼠标悬停行为.
-
-当前 UI 目标是桌宠优先, 不是传统聊天软件.所以默认体验应该是人物在前, 控件在需要时出现.
-
-## 多模态输入
+## 多模态输入状态
 
 当前支持:
 
-- 文本.
-- 图片附件.
-- 麦克风录音附件.
+- 文本输入。
+- 图片附件。
+- 麦克风录音附件。
 
-限制:
+当前限制:
 
-- 图片可以进入多模态模型输入.
-- 录音目前只是入口, 没有真实 ASR.
-- 没有 ASR 时, Aiko 不能假装听懂语音.
+- 图片可以进入多模态输入结构。
+- 录音目前只是入口, 还没有真实 ASR。
+- 没有 ASR 时, Aiko 不会假装听懂语音。
+- TTS 和 voice cloning 暂时没有接入回复播放链路。
 
-后续路线:
+后续推荐顺序:
 
-- 接入真实 ASR.
-- 将 transcript 交给 Retriever 和 Planner.
-- 接入 TTS 回复播放.
-- 最后再接 zero-shot voice cloning.
+1. 先接真实 ASR, 让录音变成 transcript。
+2. 再把 transcript 接入 Retriever 和 Planner。
+3. 再接 TTS 播放。
+4. 最后再接 zero-shot voice cloning。
 
-## 安全注意事项
+## 安全边界
 
-- 不要提交 `.env`.
-- 不要把 API Key 写入 README, 测试, 截图或日志.
-- LangChain tools 不允许直接执行 Windows 操作.
-- 高风险操作当前必须阻断.
-- Shell 命令和文件写入不属于当前实现范围.
-- 模型输出不能直接当作本地命令执行.
+当前项目刻意保守:
 
-## 项目文档
+- `.env` 不应提交到仓库。
+- API Key 不应写入 README, 测试, 截图或日志。
+- Agent 不直接执行 Windows 操作。
+- 本地动作必须经过权限层。
+- 未记住授权的动作必须用户确认。
+- 待确认动作有过期时间。
+- 高风险动作默认阻断。
+- 模型输出不能直接当作命令执行。
 
-- `docs/agent-architecture.md`: 当前 LangChain Agent 架构约束.
-- `后续agent开发.md`: 后续 Agent 开发计划.
-- `人物UI.md`: 人物 UI 和模型路线.
-- `人物设定.md`: Aiko 人格和提示词设定.
+## 常见问题
+
+### 为什么我换了 VRM 但没显示?
+
+检查三件事:
+
+1. 文件是否存在于 `assets/vrm/Aiko.vrm`。
+2. `src/renderer/components/PetStage.tsx` 里的路径是否一致。
+3. 控制台是否有 VRM 加载错误。
+
+如果模型加载失败, 项目会退回 fallback renderer, 这样 UI 不会直接白屏。
+
+### 为什么发语音 Aiko 没真正理解?
+
+因为当前还没有接真实 ASR。麦克风按钮只会生成音频附件, Agent 会明确知道语音理解未配置, 不会编造录音内容。
+
+### 为什么有些 Windows 操作不能做?
+
+这是刻意设计。当前阶段只打通低风险能力, 例如打开应用, 打开网页和创建提醒。文件写入, 删除, Shell 命令和系统设置修改会放到后续权限系统更成熟之后。
+
+### 为什么不用 Live2D?
+
+当前推荐路线已经切到 VRM + Three.js + `@pixiv/three-vrm`。理由是 VRM 更适合 3D 桌宠, 可用 VRoid Studio 直接制作模型, 后续也更容易接 lookAt, 表情, 口型和动作系统。
 
 ## 许可证
 
-本项目使用 MIT License.详见 [LICENSE](./LICENSE).
+本项目使用 MIT License。创作者: Sakura_Cianna。详见 [LICENSE](./LICENSE)。

@@ -9,13 +9,19 @@ describe("createDefaultToolRegistry", () => {
       "open_application",
       "open_url",
       "web_search",
-      "create_reminder"
+      "create_reminder",
+      "recall_memory",
+      "list_reminders"
     ]);
 
     expect(registry.get("open_application")).toMatchObject({
       capability: "open_application",
       risk: "low",
       requiresConfirmation: true,
+      schema: {
+        query: "string",
+        source: "string?"
+      },
       planOnly: true
     });
   });
@@ -34,6 +40,23 @@ describe("createDefaultToolRegistry", () => {
 
     expect(registry.get("open_application")).toMatchObject({
       risk: "low"
+    });
+  });
+
+  it("includes read-only context tools without confirmation", () => {
+    const registry = createDefaultToolRegistry();
+
+    expect(registry.get("recall_memory")).toMatchObject({
+      capability: "recall_memory",
+      risk: "low",
+      requiresConfirmation: false,
+      planOnly: true
+    });
+    expect(registry.get("list_reminders")).toMatchObject({
+      capability: "list_reminders",
+      risk: "low",
+      requiresConfirmation: false,
+      planOnly: true
     });
   });
 });

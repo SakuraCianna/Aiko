@@ -30,6 +30,14 @@ describe("Aiko agent architecture boundary", () => {
     expect(ipcHandlers).not.toContain("from \"langchain\"");
   });
 
+  it("expires pending local actions before execution", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("PENDING_ACTION_TTL_MS");
+    expect(ipcHandlers).toContain("removeExpiredPendingActions");
+    expect(ipcHandlers).toContain("createdAt");
+  });
+
   it("documents that future agent work must extend the LangChain runtime", () => {
     const architectureDoc = join("docs", "agent-architecture.md");
 

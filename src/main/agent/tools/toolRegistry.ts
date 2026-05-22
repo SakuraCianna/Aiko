@@ -2,6 +2,7 @@ import type { ToolHint } from "../types";
 
 export type AikoToolDefinition = ToolHint & {
   description: string;
+  schema: unknown;
   planOnly: boolean;
 };
 
@@ -17,6 +18,10 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     capability: "open_application",
     risk: "low",
     requiresConfirmation: true,
+    schema: {
+      query: "string",
+      source: "string?"
+    },
     planOnly: true
   },
   {
@@ -25,6 +30,10 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     capability: "open_url",
     risk: "low",
     requiresConfirmation: true,
+    schema: {
+      url: "string",
+      source: "string?"
+    },
     planOnly: true
   },
   {
@@ -33,6 +42,10 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     capability: "open_url",
     risk: "low",
     requiresConfirmation: true,
+    schema: {
+      query: "string",
+      source: "string?"
+    },
     planOnly: true
   },
   {
@@ -41,6 +54,33 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     capability: "create_reminder",
     risk: "low",
     requiresConfirmation: true,
+    schema: {
+      amount: "number",
+      unit: "minutes|hours",
+      title: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "recall_memory",
+    description: "查询本地长期记忆.只用于上下文检索,不执行系统操作.",
+    capability: "recall_memory",
+    risk: "low",
+    requiresConfirmation: false,
+    schema: {
+      query: "string",
+      limit: "number?"
+    },
+    planOnly: true
+  },
+  {
+    name: "list_reminders",
+    description: "查询本地提醒列表.只读取提醒,不创建或修改提醒.",
+    capability: "list_reminders",
+    risk: "low",
+    requiresConfirmation: false,
+    schema: {},
     planOnly: true
   }
 ];

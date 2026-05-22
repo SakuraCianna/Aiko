@@ -21,11 +21,18 @@ describe("renderer layout CSS", () => {
     expect(styles).toContain("display: none");
   });
 
-  it("keeps the character surface opaque and flush to the top of the transparent window", () => {
+  it("keeps the character surface transparent and draggable", () => {
+    const petStage = readFileSync("src/renderer/components/PetStage.tsx", "utf8");
+
     expect(styles).toContain("padding: 0 0 12px");
     expect(styles).toContain("width: 100%");
-    expect(styles).toContain("#dce8ef");
+    expect(styles).toContain("cursor: grab");
+    expect(styles).toContain("box-shadow: none");
+    expect(styles).toContain("-webkit-app-region: no-drag");
+    expect(styles).not.toContain("#dce8ef");
     expect(styles).not.toContain("rgba(250, 252, 255, 0.84)");
+    expect(petStage).toContain("startWindowDrag");
+    expect(petStage).toContain("moveWindowDrag");
   });
 
   it("keeps the fixed pet window from creating browser scrollbars", () => {
@@ -41,5 +48,19 @@ describe("renderer layout CSS", () => {
     expect(styles).toContain(".pet-reply");
     expect(styles).toContain("bottom: 78px");
     expect(styles).not.toContain("top: 12px");
+  });
+
+  it("guards stream completion so stale responses cannot overwrite newer requests", () => {
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+
+    expect(app).toContain("isActiveRequest");
+    expect(app).toContain("if (!isActiveRequest(requestId)) return");
+  });
+
+  it("cleans renderer timers when the app unmounts", () => {
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+
+    expect(app).toContain("clearHideControlsTimer");
+    expect(app).toContain("unsubscribeStreamDeltas");
   });
 });

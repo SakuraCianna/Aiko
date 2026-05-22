@@ -32,6 +32,20 @@ export type ChatStreamDelta = {
   text: string;
 };
 
+export type WindowDragPoint = {
+  screenX: number;
+  screenY: number;
+};
+
+export type CursorState = {
+  screenX: number;
+  screenY: number;
+  windowX: number;
+  windowY: number;
+  windowWidth: number;
+  windowHeight: number;
+};
+
 export type MemoryCandidateDto = {
   id: string;
   type: string;
@@ -61,6 +75,10 @@ export type MemorySnapshotDto = {
 export type AikoApi = {
   ping: () => Promise<{ ok: true; value: "pong" }>;
   setClickThrough: (enabled: boolean) => Promise<void>;
+  getCursorState: () => Promise<CursorState>;
+  startWindowDrag: (point: WindowDragPoint) => Promise<void>;
+  moveWindowDrag: (point: WindowDragPoint) => Promise<void>;
+  endWindowDrag: () => Promise<void>;
   openPanel: (panel: PanelName) => Promise<void>;
   sendMessage: (payload: ChatPayload) => Promise<ChatResponse>;
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;

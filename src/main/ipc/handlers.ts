@@ -1,12 +1,13 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, ipcMain, screen, type WebContents } from "electron";
 import { createActionExecutor } from "../actions/actionExecutor";
 import type { AikoAgentRuntime } from "../agent/aikoAgentRuntime";
 import { discoverApplications } from "../capabilities/applicationCatalog";
 import { openApplication } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
+import { PET_WINDOW_SIZE } from "../windows/petWindowConfig";
 import type { MemoryRepository, PermissionRepository, ReminderRepository } from "../database/repositories";
 import { validateChatPayload, type ChatPayload } from "../../shared/chatPayload";
-import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto } from "../../shared/ipcTypes";
+import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto, WindowDragPoint } from "../../shared/ipcTypes";
 
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
@@ -17,9 +18,24 @@ export type AikoHandlerDeps = {
   reminderRepository?: Pick<ReminderRepository, "save" | "list">;
 };
 
+type PendingActionEntry = {
+  action: PendingActionDto;
+  createdAt: number;
+};
+
+type WindowDragState = {
+  pointerStartX: number;
+  pointerStartY: number;
+  windowStartX: number;
+  windowStartY: number;
+};
+
+const PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
+
 // 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
-  const pendingActions = new Map<string, PendingActionDto>();
+  const pendingActions = new Map<string, PendingActionEntry>();
+  let windowDragState: WindowDragState | null = null;
   const actionExecutor = createActionExecutor({
     openUrl,
     openApplication: (query) => openApplication(discoverApplications(), query),
@@ -33,6 +49,49 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   ipcMain.handle("window:set-click-through", (_event, enabled: unknown) => {
     if (typeof enabled !== "boolean") return;
     deps.petWindow.setIgnoreMouseEvents(enabled, { forward: true });
+  });
+
+  ipcMain.handle("window:get-cursor-state", () => {
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = deps.petWindow.getBounds();
+    return {
+      screenX: cursor.x,
+      screenY: cursor.y,
+      windowX: bounds.x,
+      windowY: bounds.y,
+      windowWidth: bounds.width,
+      windowHeight: bounds.height
+    };
+  });
+
+  ipcMain.handle("window:drag-start", (_event, point: unknown) => {
+    if (!isWindowDragPoint(point)) return;
+    const bounds = deps.petWindow.getBounds();
+    windowDragState = {
+      pointerStartX: point.screenX,
+      pointerStartY: point.screenY,
+      windowStartX: bounds.x,
+      windowStartY: bounds.y
+    };
+  });
+
+  ipcMain.handle("window:drag-move", (_event, point: unknown) => {
+    if (!windowDragState || !isWindowDragPoint(point)) return;
+    const nextX = Math.round(windowDragState.windowStartX + point.screenX - windowDragState.pointerStartX);
+    const nextY = Math.round(windowDragState.windowStartY + point.screenY - windowDragState.pointerStartY);
+    deps.petWindow.setBounds(
+      {
+        x: nextX,
+        y: nextY,
+        width: PET_WINDOW_SIZE.width,
+        height: PET_WINDOW_SIZE.height
+      },
+      false
+    );
+  });
+
+  ipcMain.handle("window:drag-end", () => {
+    windowDragState = null;
   });
 
   ipcMain.handle("window:open-panel", (_event, panel: unknown) => {
@@ -67,7 +126,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
     try {
       const response = await deps.agentRuntime.respondStream(payload, (text) => {
-        event.sender.send("chat:stream-delta", { requestId, text });
+        sendStreamDelta(event.sender, requestId, text);
       });
       return respondWithLocalAction(response.message, response.pendingAction);
     } catch {
@@ -85,13 +144,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作没有有效的确认令牌." };
     }
 
-    const pendingAction = pendingActions.get(actionId);
+    removeExpiredPendingActions(pendingActions, Date.now());
+    const pendingEntry = pendingActions.get(actionId);
     pendingActions.delete(actionId);
-    if (!pendingAction || !sameAction(pendingAction, request.action)) {
+    if (!pendingEntry || !sameAction(pendingEntry.action, request.action)) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    return actionExecutor.execute({ action: pendingAction, remember: request.remember });
+    return actionExecutor.execute({ action: pendingEntry.action, remember: request.remember });
   });
 
   ipcMain.handle("memory:list", () => {
@@ -131,8 +191,19 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
     const actionId = crypto.randomUUID();
     const pendingAction = { ...action, id: actionId };
-    pendingActions.set(actionId, pendingAction);
+    removeExpiredPendingActions(pendingActions, Date.now());
+    pendingActions.set(actionId, { action: pendingAction, createdAt: Date.now() });
     return { message, pendingAction };
+  }
+}
+
+// 校验聊天输入, 无效时返回 null 供 IPC 层降级处理.
+// 清理已经过期的待确认动作, 避免很久之前的授权被重新执行.
+function removeExpiredPendingActions(pendingActions: Map<string, PendingActionEntry>, now: number) {
+  for (const [actionId, entry] of pendingActions) {
+    if (now - entry.createdAt > PENDING_ACTION_TTL_MS) {
+      pendingActions.delete(actionId);
+    }
   }
 }
 
@@ -142,6 +213,23 @@ function parseChatPayload(input: unknown): ChatPayload | null {
     return validateChatPayload(input);
   } catch {
     return null;
+  }
+}
+
+// 发送流式增量前检查 WebContents 生命周期, 避免窗口关闭后继续投递 IPC.
+// 校验窗口拖拽坐标, 防止 renderer 传入无效值.
+function isWindowDragPoint(value: unknown): value is WindowDragPoint {
+  if (!value || typeof value !== "object") return false;
+  const point = value as WindowDragPoint;
+  return Number.isFinite(point.screenX) && Number.isFinite(point.screenY);
+}
+
+function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
+  if (sender.isDestroyed()) return;
+  try {
+    sender.send("chat:stream-delta", { requestId, text });
+  } catch {
+    return;
   }
 }
 

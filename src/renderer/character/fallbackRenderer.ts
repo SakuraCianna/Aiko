@@ -18,6 +18,10 @@ export function createFallbackCharacterRenderer(reason = "VRM 模型尚未加载
     setExpression(expression) {
       if (fallbackNode) fallbackNode.dataset.expression = expression;
     },
+    // 在占位节点上记录持续行为状态.
+    setBehavior(behavior) {
+      if (fallbackNode) fallbackNode.dataset.behavior = behavior;
+    },
     // 在占位节点上记录动作状态.
     playMotion(motion) {
       if (fallbackNode) fallbackNode.dataset.motion = motion;

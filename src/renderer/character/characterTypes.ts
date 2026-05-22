@@ -21,6 +21,17 @@ export type CharacterMotion =
   | "tap"
   | "drag";
 
+export type CharacterBehavior =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "dragging"
+  | "confirming"
+  | "success"
+  | "failure"
+  | "asleep";
+
 export type CharacterRendererConfig = {
   vrmPath: string;
   defaultExpression: CharacterExpression;
@@ -29,6 +40,7 @@ export type CharacterRendererConfig = {
 export type CharacterRenderer = {
   mount: (element: HTMLElement, config: CharacterRendererConfig) => Promise<void>;
   setExpression: (expression: CharacterExpression) => void;
+  setBehavior: (behavior: CharacterBehavior) => void;
   playMotion: (motion: CharacterMotion) => void;
   setMouthOpen: (value: number) => void;
   lookAt: (x: number, y: number) => void;

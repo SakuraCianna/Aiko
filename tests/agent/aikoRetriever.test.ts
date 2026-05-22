@@ -71,6 +71,12 @@ describe("createAikoRetriever", () => {
       }),
       expect.objectContaining({
         name: "create_reminder"
+      }),
+      expect.objectContaining({
+        name: "recall_memory"
+      }),
+      expect.objectContaining({
+        name: "list_reminders"
       })
     ]);
   });

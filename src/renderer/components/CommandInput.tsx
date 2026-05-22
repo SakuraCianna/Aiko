@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, SubmitEvent as ReactSubmitEvent } from "react";
 import { ImagePlus, Mic, Send, Square, X } from "lucide-react";
 import {
@@ -25,15 +25,26 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const mountedRef = useRef(true);
+  const attachmentsRef = useRef<ChatAttachment[]>([]);
+  const recordingSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      cleanupRecording();
+    };
+  }, []);
 
   // 提交当前文本和附件.
   function submit(event: ReactSubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = value.trim();
-    if (!trimmed && attachments.length === 0) return;
-    void onSubmit({ text: trimmed, attachments });
+    const currentAttachments = attachmentsRef.current;
+    if (!trimmed && currentAttachments.length === 0) return;
+    void onSubmit({ text: trimmed, attachments: currentAttachments });
     setValue("");
-    setAttachments([]);
+    setAttachmentList([]);
     setError("");
   }
 
@@ -43,7 +54,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     event.currentTarget.value = "";
     setError("");
 
-    if (attachments.length + selectedFiles.length > MAX_ATTACHMENTS) {
+    if (attachmentsRef.current.length + selectedFiles.length > MAX_ATTACHMENTS) {
       setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
       return;
     }
@@ -51,7 +62,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     const nextAttachments: ChatAttachment[] = [];
     for (const file of selectedFiles) {
       if (!isImageMimeType(file.type)) {
-        setError("只支持 PNG,JPEG,WebP,GIF 图片.");
+        setError("只支持 PNG, JPEG, WebP, GIF 图片.");
         return;
       }
 
@@ -60,29 +71,37 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
         return;
       }
 
+      const dataUrl = await readAsDataUrl(file);
+      if (!mountedRef.current) return;
+
       nextAttachments.push({
         id: crypto.randomUUID(),
         kind: "image",
         name: file.name,
         mimeType: file.type,
         size: file.size,
-        dataUrl: await readAsDataUrl(file)
+        dataUrl
       });
     }
 
-    setAttachments((current) => [...current, ...nextAttachments]);
+    appendAttachments(nextAttachments);
   }
 
   // 开始或停止默认麦克风录音.
   async function toggleRecording() {
     setError("");
 
-    if (isRecording) {
-      recorderRef.current?.stop();
+    if (recordingSessionRef.current) {
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      } else {
+        cleanupRecording();
+      }
       return;
     }
 
-    if (attachments.length >= MAX_ATTACHMENTS) {
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
       setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
       return;
     }
@@ -92,8 +111,17 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
+    const sessionId = crypto.randomUUID();
+    recordingSessionRef.current = sessionId;
+    setIsRecording(true);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
+        stopMediaStream(stream);
+        return;
+      }
+
       const mimeType = selectSupportedAudioMimeType((candidate) => MediaRecorder.isTypeSupported(candidate));
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 
@@ -102,30 +130,39 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       recorderRef.current = recorder;
 
       recorder.addEventListener("dataavailable", (event) => {
+        if (recordingSessionRef.current !== sessionId) return;
         if (event.data.size > 0) recordingChunksRef.current.push(event.data);
       });
 
-      recorder.addEventListener("stop", () => {
-        void finishRecording();
-      });
+      recorder.addEventListener(
+        "stop",
+        () => {
+          void finishRecording(sessionId);
+        },
+        { once: true }
+      );
 
       recorder.start();
-      setIsRecording(true);
     } catch {
-      stopMicrophoneStream();
-      setIsRecording(false);
-      setError("无法访问默认麦克风,请检查 Windows 麦克风权限.");
+      if (recordingSessionRef.current !== sessionId) return;
+      cleanupRecording();
+      if (mountedRef.current) setError("无法访问默认麦克风, 请检查 Windows 麦克风权限.");
     }
   }
 
   // 停止录音后把音频片段转换成聊天附件.
-  async function finishRecording() {
+  async function finishRecording(sessionId: string) {
+    if (recordingSessionRef.current !== sessionId) return;
+
     const chunks = recordingChunksRef.current;
     const mimeType = recorderRef.current?.mimeType || "audio/webm";
+    recordingSessionRef.current = null;
     recorderRef.current = null;
     recordingChunksRef.current = [];
     stopMicrophoneStream();
-    setIsRecording(false);
+    if (mountedRef.current) setIsRecording(false);
+
+    if (!mountedRef.current) return;
 
     if (chunks.length === 0) {
       setError("没有录到有效语音.");
@@ -139,18 +176,48 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     }
 
     const attachment = await createAudioAttachmentFromBlob(blob);
-    setAttachments((current) => [...current, attachment]);
+    if (!mountedRef.current) return;
+    appendAttachments([attachment]);
+  }
+
+  // 同步附件状态和附件引用, 避免异步回调使用过期数组.
+  function setAttachmentList(nextAttachments: ChatAttachment[]) {
+    attachmentsRef.current = nextAttachments;
+    if (mountedRef.current) setAttachments(nextAttachments);
+  }
+
+  // 追加附件并在提交时再次检查数量上限.
+  function appendAttachments(nextAttachments: ChatAttachment[]) {
+    if (nextAttachments.length === 0) return;
+    const currentAttachments = attachmentsRef.current;
+    if (currentAttachments.length + nextAttachments.length > MAX_ATTACHMENTS) {
+      if (mountedRef.current) setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
+      return;
+    }
+    setAttachmentList([...currentAttachments, ...nextAttachments]);
+  }
+
+  // 停止当前录音会话并释放关联资源.
+  function cleanupRecording() {
+    recordingSessionRef.current = null;
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    recordingChunksRef.current = [];
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    stopMicrophoneStream();
+    if (mountedRef.current) setIsRecording(false);
   }
 
   // 停止麦克风流, 释放系统录音资源.
   function stopMicrophoneStream() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (!streamRef.current) return;
+    stopMediaStream(streamRef.current);
     streamRef.current = null;
   }
 
   // 从待发送列表中移除指定附件.
   function removeAttachment(id: string) {
-    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    setAttachmentList(attachmentsRef.current.filter((attachment) => attachment.id !== id));
   }
 
   return (
@@ -211,4 +278,9 @@ function readAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
+}
+
+// 停止指定媒体流内的所有轨道.
+function stopMediaStream(stream: MediaStream) {
+  stream.getTracks().forEach((track) => track.stop());
 }

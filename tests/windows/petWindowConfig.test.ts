@@ -17,9 +17,17 @@ describe("petWindowConfig", () => {
       title: "",
       frame: false,
       transparent: true,
+      backgroundColor: "#00000000",
+      thickFrame: false,
+      autoHideMenuBar: true,
       resizable: false,
+      movable: true,
+      minimizable: false,
       maximizable: false,
       fullscreenable: false
     });
+    expect(options).not.toHaveProperty("titleBarStyle");
+    expect(options).not.toHaveProperty("titleBarOverlay");
+    expect(options.skipTaskbar).toBe(true);
   });
 });
