@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AIKO_CHAT_TEMPERATURE,
+  buildGlmModelRoute,
   createAikoAgentRuntime,
   extractAssistantText,
+  isRetryableModelRouteError,
   isConversationResetRequest
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
@@ -45,6 +47,23 @@ describe("Aiko persona prompt", () => {
 describe("createAikoAgentRuntime", () => {
   it("keeps the default chat model temperature low enough for a local assistant", () => {
     expect(AIKO_CHAT_TEMPERATURE).toBeLessThanOrEqual(0.3);
+  });
+
+  it("builds a deduped GLM model route with the primary model first", () => {
+    expect(buildGlmModelRoute("glm-4.6v-flash", ["glm-4v-flash", "glm-4.6v-flash"])).toEqual([
+      "glm-4.6v-flash",
+      "glm-4v-flash"
+    ]);
+  });
+
+  it("treats GLM rate limit errors as retryable model route failures", () => {
+    const error = Object.assign(new Error("429 该模型当前访问量过大，请您稍后再试"), {
+      status: 429,
+      code: "1305"
+    });
+
+    expect(isRetryableModelRouteError(error)).toBe(true);
+    expect(isRetryableModelRouteError(Object.assign(new Error("401"), { status: 401 }))).toBe(false);
   });
 
   it("proposes low-risk application actions without calling the model", async () => {
@@ -493,6 +512,39 @@ describe("createAikoAgentRuntime", () => {
     const response = await runtime.respond(textPayload("随便聊聊"));
 
     expect(response.message).toContain("大模型那边现在没接上");
+  });
+
+  it("logs sanitized model failures for diagnosis", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = Object.assign(new Error("429 model busy"), {
+      status: 429,
+      code: "1305",
+      type: "rate_limit",
+      apiKey: "secret-key",
+      headers: { authorization: "Bearer secret-key" }
+    });
+
+    try {
+      const runtime = createAikoAgentRuntime({
+        agent: {
+          async invoke() {
+            throw error;
+          }
+        }
+      });
+
+      await runtime.respond(textPayload("chat"));
+
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      const serializedLog = JSON.stringify(consoleError.mock.calls[0]);
+      expect(serializedLog).toContain("[aiko:agent] model call failed");
+      expect(serializedLog).toContain("429");
+      expect(serializedLog).toContain("1305");
+      expect(serializedLog).not.toContain("secret-key");
+      expect(serializedLog).not.toContain("authorization");
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("streams assistant deltas when the injected LangChain agent supports streaming", async () => {

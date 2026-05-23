@@ -182,7 +182,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       trace.end({ mode: "chat" });
       rememberConversationTurn(context.userTranscript, message);
       return { message };
-    } catch {
+    } catch (error) {
+      console.error("[aiko:agent] model call failed", formatAgentErrorForLog(error));
       const message = describeModelFallback();
       onDelta?.(message);
       trace.add("agent.failed");
@@ -254,24 +255,39 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   }
 }
 
+// 构建主模型优先的模型路由, 去重后依次尝试备用模型.
+export function buildGlmModelRoute(primaryModel: string, fallbackModels: string[] = []): string[] {
+  const route: string[] = [];
+  const seen = new Set<string>();
+
+  for (const model of [primaryModel, ...fallbackModels]) {
+    const normalized = model.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    route.push(normalized);
+  }
+
+  return route;
+}
+
+export function isRetryableModelRouteError(error: unknown): boolean {
+  const record = isRecord(error) ? error : {};
+  const status = readDiagnosticField(record, "status");
+  const code = readDiagnosticField(record, "code");
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    String(status) === "429"
+    || String(code) === "1305"
+    || /MODEL_RATE_LIMIT|rate.?limit|访问量过大|稍后再试/i.test(message)
+  );
+}
+
 // 创建默认 LangChain Agent 工厂, 每次请求都注入独立的动作收集器.
 function createDefaultAgentFactory(config: AppConfig, registry = createDefaultToolRegistry()): AikoAgentFactory {
-  const model = new ChatOpenAICompletions({
-    model: config.glm.model,
-    apiKey: config.glm.apiKey,
-    temperature: AIKO_CHAT_TEMPERATURE,
-    maxRetries: 1,
-    configuration: {
-      baseURL: config.glm.baseUrl
-    }
-  });
+  const modelRoute = buildGlmModelRoute(config.glm.model, config.glm.fallbackModels);
 
-  return (proposedActions) =>
-    createAgent({
-      model,
-      systemPrompt: buildAikoSystemPrompt(),
-      tools: createAikoTools(proposedActions, registry)
-    });
+  return (proposedActions) => createRoutedAgentInvoker(config, modelRoute, proposedActions, registry);
 }
 
 // 判断用户是否明确要求开启新对话或清空当前上下文.
@@ -348,26 +364,170 @@ function createRequestAgent(
   return factory(proposedActions);
 }
 
-// 创建默认记忆候选提取器, 使用低温度模型输出结构化记忆.
-function createDefaultMemoryCandidateExtractor(config: AppConfig): MemoryCandidateExtractor {
-  const model = new ChatOpenAICompletions({
-    model: config.glm.model,
+// 创建带模型路由的 Agent, 同一套 LangChain 工具和提示词在不同模型之间切换.
+function createRoutedAgentInvoker(
+  config: AppConfig,
+  modelRoute: string[],
+  proposedActions: PendingActionDto[],
+  registry = createDefaultToolRegistry()
+): AikoAgentInvoker {
+  return {
+    async invoke(input) {
+      return invokeWithModelRoute(modelRoute, async (modelName, attemptActions) => {
+        const agent = createLangChainAgentForModel(config, modelName, attemptActions, registry);
+        return agent.invoke(input);
+      }, proposedActions);
+    },
+    async *stream(input, options) {
+      yield* streamWithModelRoute(modelRoute, async (modelName, attemptActions) => {
+        const agent = createLangChainAgentForModel(config, modelName, attemptActions, registry);
+        return agent.stream(input, options);
+      }, proposedActions);
+    }
+  };
+}
+
+// 为单个模型创建 LangChain Agent, 路由器会在失败时换下一个模型.
+function createLangChainAgentForModel(
+  config: AppConfig,
+  modelName: string,
+  proposedActions: PendingActionDto[],
+  registry = createDefaultToolRegistry()
+) {
+  return createAgent({
+    model: createChatModel(config, modelName, AIKO_CHAT_TEMPERATURE),
+    systemPrompt: buildAikoSystemPrompt(),
+    tools: createAikoTools(proposedActions, registry)
+  });
+}
+
+// 创建兼容智谱 OpenAI 风格接口的 LangChain Chat 模型.
+function createChatModel(config: AppConfig, modelName: string, temperature: number) {
+  return new ChatOpenAICompletions({
+    model: modelName,
     apiKey: config.glm.apiKey,
-    temperature: 0,
+    temperature,
     maxRetries: 1,
     configuration: {
       baseURL: config.glm.baseUrl
     }
   });
+}
+
+// 非流式调用按模型路由依次尝试, 只有成功尝试产生的动作会进入主动作池.
+async function invokeWithModelRoute<T>(
+  modelRoute: string[],
+  invokeAttempt: (modelName: string, attemptActions: PendingActionDto[]) => Promise<T>,
+  proposedActions: PendingActionDto[]
+): Promise<T> {
+  let lastError: unknown;
+
+  for (const [index, modelName] of modelRoute.entries()) {
+    const attemptActions: PendingActionDto[] = [];
+    try {
+      const result = await invokeAttempt(modelName, attemptActions);
+      proposedActions.push(...attemptActions);
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (!shouldTryFallbackModel(error, modelRoute, index)) throw error;
+      logModelRouteFallback(modelName, modelRoute[index + 1], error);
+    }
+  }
+
+  throw lastError ?? new Error("Aiko model route is empty");
+}
+
+// 流式调用同样按模型路由兜底, 避免主模型限流时直接进入兜底文案.
+async function* streamWithModelRoute(
+  modelRoute: string[],
+  streamAttempt: (modelName: string, attemptActions: PendingActionDto[]) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>,
+  proposedActions: PendingActionDto[]
+): AsyncIterable<unknown> {
+  let lastError: unknown;
+
+  for (const [index, modelName] of modelRoute.entries()) {
+    const attemptActions: PendingActionDto[] = [];
+    try {
+      const stream = await streamAttempt(modelName, attemptActions);
+      for await (const chunk of stream) {
+        yield chunk;
+      }
+      proposedActions.push(...attemptActions);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!shouldTryFallbackModel(error, modelRoute, index)) throw error;
+      logModelRouteFallback(modelName, modelRoute[index + 1], error);
+    }
+  }
+
+  throw lastError ?? new Error("Aiko model route is empty");
+}
+
+// 判断当前失败是否应该切换到下一个模型.
+function shouldTryFallbackModel(error: unknown, modelRoute: string[], index: number) {
+  return index < modelRoute.length - 1 && isRetryableModelRouteError(error);
+}
+
+// 记录模型路由切换, 用 warn 级别提示这是可恢复降级而不是最终失败.
+function logModelRouteFallback(modelName: string, nextModel: string | undefined, error: unknown) {
+  console.warn("[aiko:agent-router] model failed, trying fallback", {
+    model: modelName,
+    nextModel,
+    error: formatAgentErrorForLog(error)
+  });
+}
+
+// 只记录大模型错误的诊断字段, 避免把 API Key 或请求头写进日志.
+function formatAgentErrorForLog(error: unknown) {
+  const record = isRecord(error) ? error : {};
+
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    message: sanitizeDiagnosticText(error instanceof Error ? error.message : String(error)),
+    status: readDiagnosticField(record, "status"),
+    code: readDiagnosticField(record, "code"),
+    type: readDiagnosticField(record, "type")
+  };
+}
+
+// 读取可安全打印的标量字段, 跳过 headers, body 等可能含敏感内容的对象.
+function readDiagnosticField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (typeof value === "string") return sanitizeDiagnosticText(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  return undefined;
+}
+
+// 对常见密钥形态做脱敏, 让开发日志可以放心保留.
+function sanitizeDiagnosticText(text: string) {
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9._-]+/gi, "sk-[redacted]")
+    .replace(/[A-Za-z0-9]{24,}\.[A-Za-z0-9._-]{8,}/g, "[redacted-api-key]");
+}
+
+// 判断未知错误对象是否可以安全按普通对象读取字段.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+// 创建默认记忆候选提取器, 使用低温度模型输出结构化记忆.
+function createDefaultMemoryCandidateExtractor(config: AppConfig): MemoryCandidateExtractor {
+  const modelRoute = buildGlmModelRoute(config.glm.model, config.glm.fallbackModels);
 
   return (transcript) =>
     extractMemoryCandidates(transcript, async (conversation) => {
       // 记忆提取和聊天人格隔离, 避免角色语气污染长期事实.
-      const response = await model.invoke([
-        { role: "system", content: MEMORY_EXTRACTION_PROMPT },
-        { role: "user", content: conversation }
-      ]);
-      return readContentText(response.content);
+      return invokeWithModelRoute(modelRoute, async (modelName) => {
+        const model = createChatModel(config, modelName, 0);
+        const response = await model.invoke([
+          { role: "system", content: MEMORY_EXTRACTION_PROMPT },
+          { role: "user", content: conversation }
+        ]);
+        return readContentText(response.content);
+      }, []);
     });
 }
 

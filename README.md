@@ -75,8 +75,12 @@ copy .env.example .env
 ```env
 GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 GLM_MODEL=glm-4.6v-flash
+GLM_FALLBACK_MODELS=glm-4v-flash
 GLM_API_KEY=replace-with-your-api-key
 ```
+
+`GLM_MODEL` 是主模型, `GLM_FALLBACK_MODELS` 是备用模型列表, 多个模型可以用逗号分隔。
+当主模型返回 429 或访问量过大时, Aiko 会在 LangChain Runtime 内自动切到备用模型。
 
 启动开发模式:
 
