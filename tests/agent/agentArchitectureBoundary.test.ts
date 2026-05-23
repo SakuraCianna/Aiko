@@ -46,6 +46,13 @@ describe("Aiko agent architecture boundary", () => {
     expect(ipcHandlers).toContain("pendingActions.clear()");
   });
 
+  it("aborts an older stream before replacing the same request id", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("abortPreviousStreamController(requestId)");
+    expect(ipcHandlers).toContain("previousController.abort()");
+  });
+
   it("does not auto-execute unremembered open-application actions from the agent", () => {
     const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
 

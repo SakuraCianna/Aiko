@@ -4,11 +4,15 @@ import { createDefaultToolRegistry } from "../tools/toolRegistry";
 import type { AikoToolRegistry } from "../tools/toolRegistry";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
+import { formatWebResearchContext } from "./webRetriever";
+import type { WebRetriever } from "./webRetriever";
+import type { WebResearchContext } from "./webTypes";
 
 export type AikoRetrieverOptions = {
   memoryRuntime?: AikoMemoryRuntime;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   toolRegistry?: AikoToolRegistry;
+  webRetriever?: WebRetriever;
 };
 
 export type AikoRetriever = {
@@ -26,12 +30,15 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
     async retrieve(payload) {
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
-      const memories = await recallForAgent(options.memoryRuntime, userTranscript);
+      const [memories, webResearch] = await Promise.all([
+        recallForAgent(options.memoryRuntime, userTranscript),
+        retrieveWebResearch(options.webRetriever, payload.text, userTranscript)
+      ]);
 
       return {
         userText: payload.text,
         userTranscript,
-        userContent: buildUserContent(payload, speechResults, memories),
+        userContent: buildUserContent(payload, speechResults, memories, webResearch),
         attachmentSummaries: payload.attachments.map((attachment) => ({
           id: attachment.id,
           kind: attachment.kind,
@@ -41,6 +48,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
         })),
         memories,
         speechResults,
+        webResearch,
         toolHints: toolRegistry.list().map((tool) => ({
           name: tool.name,
           capability: tool.capability,
@@ -97,7 +105,8 @@ export function buildUserTranscript(payload: ChatPayload, speechResults: SpeechU
 export function buildUserContent(
   payload: ChatPayload,
   speechResults: SpeechUnderstandingResult[],
-  recalledMemories: RecalledMemory[]
+  recalledMemories: RecalledMemory[],
+  webResearch?: WebResearchContext | null
 ): AgentUserContent {
   const imageAttachments = payload.attachments.filter((attachment) => attachment.kind === "image");
   const audioAttachments = payload.attachments.filter((attachment) => attachment.kind === "audio");
@@ -110,13 +119,15 @@ export function buildUserContent(
   const text = payload.text || transcriptText || "请根据我上传的附件进行回应.";
   const speechContext = formatSpeechUnderstandingContext(audioAttachments.length, speechResults);
   const memoryContext = formatMemoryContext(recalledMemories);
+  const webContext = formatWebResearchContext(webResearch);
+  const textContext = [text, memoryContext, speechContext, webContext].filter(Boolean).join("\n\n");
 
   // 文本块携带 grounding 说明, 并和可选多模态内容一起发送.
   if (imageAttachments.length === 0) {
-    return [text, memoryContext, speechContext].filter(Boolean).join("\n\n");
+    return textContext;
   }
 
-  parts.push({ type: "text", text: [text, memoryContext, speechContext].filter(Boolean).join("\n\n") });
+  parts.push({ type: "text", text: textContext });
   for (const attachment of imageAttachments) {
     parts.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
   }
@@ -134,6 +145,24 @@ async function recallForAgent(memoryRuntime: AikoMemoryRuntime | undefined, quer
 }
 
 // 格式化召回记忆, 并提醒模型只能把它当作偏好参考.
+// 调用网页检索器, 失败时降级为空上下文, 避免外部 MCP 影响本地聊天.
+async function retrieveWebResearch(
+  webRetriever: WebRetriever | undefined,
+  userText: string,
+  userTranscript: string
+): Promise<WebResearchContext | null> {
+  if (!webRetriever) return null;
+  try {
+    return await webRetriever.retrieve({ userText, userTranscript });
+  } catch (error) {
+    console.warn("[aiko:web-retriever] web research failed", {
+      name: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
 export function formatMemoryContext(memories: RecalledMemory[]): string {
   if (memories.length === 0) return "";
   const lines = memories.map((memory, index) => `${index + 1}. [${memory.type}] ${memory.content}`);

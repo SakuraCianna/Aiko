@@ -17,23 +17,31 @@ import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import { classifyMemoryCandidate, extractMemoryCandidates } from "../memory/silentMemoryWorker";
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
+import { createTavilyWebSearchProvider } from "./mcp/tavilyMcpProvider";
 import { buildSearchUrl, createAikoPlanner } from "./planner/aikoPlanner";
 import { createAikoRetriever } from "./retriever/aikoRetriever";
+import { createWebRetriever } from "./retriever/webRetriever";
 import { createDefaultToolRegistry } from "./tools/toolRegistry";
 import { createAikoTraceRecorder } from "./trace/aikoTrace";
 import type { AgentUserContent, AikoMemoryRuntime } from "./types";
 import type { AikoTraceRecorder } from "./trace/aikoTrace";
+import type { WebRetriever } from "./retriever/webRetriever";
 
 type AgentInput = { messages: BaseMessageLike[] };
 type LangChainAgent = ReturnType<typeof createAgent>;
+type AgentInvokeOptions = Parameters<LangChainAgent["invoke"]>[1];
 type AgentStreamOptions = Parameters<LangChainAgent["stream"]>[1];
+type AssistantTextExtractionOptions = {
+  streaming?: boolean;
+};
 
 export const AIKO_CHAT_TEMPERATURE = 0.3;
 const LONG_RESPONSE_MARKDOWN_THRESHOLD = 1200;
 const DESKTOP_MARKDOWN_TARGET = "Desktop/Aiko";
+const STREAM_CANCELLED_MESSAGE = "已中止. 我先停下.";
 
 export type AikoAgentInvoker = {
-  invoke: (input: AgentInput) => Promise<unknown>;
+  invoke: (input: AgentInput, options?: AgentInvokeOptions) => Promise<unknown>;
   stream?: (input: AgentInput, options?: AgentStreamOptions) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>;
 };
 
@@ -41,9 +49,17 @@ export type AikoAgentFactory = (proposedActions: PendingActionDto[]) => AikoAgen
 
 export type AikoAgentRuntime = {
   respond: (payload: ChatPayload) => Promise<ChatResponse>;
-  respondStream: (payload: ChatPayload, onDelta: (text: string) => void) => Promise<ChatResponse>;
+  respondStream: (
+    payload: ChatPayload,
+    onDelta: (text: string) => void,
+    options?: AikoAgentRequestOptions
+  ) => Promise<ChatResponse>;
   listConversation: () => ConversationSnapshot;
   resetConversation: () => ConversationSnapshot;
+};
+
+export type AikoAgentRequestOptions = {
+  signal?: AbortSignal;
 };
 
 export type MemoryCandidateExtractor = (transcript: string) => Promise<MemoryCandidate[]>;
@@ -67,6 +83,7 @@ export type AikoAgentRuntimeOptions = {
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   memoryRuntime?: AikoMemoryRuntime;
   memoryCandidateExtractor?: MemoryCandidateExtractor;
+  webRetriever?: WebRetriever;
   traceRecorder?: AikoTraceRecorder;
   maxConversationMessages?: number;
   maxConversationContextChars?: number;
@@ -80,10 +97,12 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const speechUnderstandingProvider =
     options.speechUnderstandingProvider;
   const toolRegistry = createDefaultToolRegistry();
+  const webRetriever = options.webRetriever ?? createDefaultWebRetriever(options.config);
   const retriever = createAikoRetriever({
     memoryRuntime: options.memoryRuntime,
     speechUnderstandingProvider,
-    toolRegistry
+    toolRegistry,
+    webRetriever
   });
   const planner = createAikoPlanner();
   const executor = createAikoExecutor();
@@ -97,16 +116,27 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   };
 
   // 处理一次普通或流式聊天请求.
-  async function respondInternal(payload: ChatPayload, onDelta?: (text: string) => void): Promise<ChatResponse> {
+  async function respondInternal(
+    payload: ChatPayload,
+    onDelta?: (text: string) => void,
+    requestOptions: AikoAgentRequestOptions = {}
+  ): Promise<ChatResponse> {
+    const signal = requestOptions.signal;
+    if (isAbortSignalAborted(signal)) return { message: STREAM_CANCELLED_MESSAGE };
+    const emitDelta = (text: string) => {
+      if (!isAbortSignalAborted(signal)) onDelta?.(text);
+    };
+
     if (isConversationResetRequest(payload)) {
       resetConversation();
       const message = "已开启新对话. 当前对话上下文已清空, 长期记忆仍然保留.";
-      onDelta?.(message);
+      emitDelta(message);
       return { message };
     }
 
     const trace = traceRecorder.start();
     const context = await retriever.retrieve(payload);
+    throwIfAborted(signal);
     trace.add("retriever.completed", {
       memoryCount: context.memories.length,
       attachmentCount: context.attachmentSummaries.length
@@ -117,14 +147,16 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       userTranscript: context.userTranscript,
       toolHints: context.toolHints
     });
+    throwIfAborted(signal);
     trace.add("planner.completed", {
       mode: plan.mode,
       stepCount: plan.steps.length
     });
 
     const proposal = await executor.prepare(plan);
+    throwIfAborted(signal);
     if (proposal.kind === "pending_action") {
-      onDelta?.(proposal.message);
+      emitDelta(proposal.message);
       trace.add("executor.prepared", {
         capability: proposal.action.capability,
         risk: proposal.action.risk
@@ -135,7 +167,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     if (proposal.kind === "blocked") {
-      onDelta?.(proposal.message);
+      emitDelta(proposal.message);
       trace.add("executor.blocked");
       trace.end({ mode: "blocked" });
       rememberConversationTurn(context.userTranscript, proposal.message);
@@ -149,7 +181,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         messages: [new HumanMessage({ content: withConversationContext(context.userContent) })]
       };
       const prefersDesktopMarkdown = shouldPreferDesktopMarkdownResponse(context.userText, context.userTranscript);
-      const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : onDelta);
+      const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
+      throwIfAborted(signal);
       const assistantText = extractAssistantText(result);
       const action = proposedActions.at(-1);
       trace.add("agent.completed", {
@@ -160,7 +193,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
       if (action) {
         const message = describeModelProposedAction(action);
-        if (!assistantText) onDelta?.(message);
+        if (!assistantText) emitDelta(message);
         await rememberExchange(runtimeOptions, context.userTranscript, assistantText || message);
         trace.end({ mode: "tool_action" });
         rememberConversationTurn(context.userTranscript, assistantText || message);
@@ -177,15 +210,20 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       }
 
       const message = assistantText || describeEmptyAssistantReply();
-      if (!assistantText) onDelta?.(message);
+      if (!assistantText) emitDelta(message);
       await rememberExchange(runtimeOptions, context.userTranscript, message);
       trace.end({ mode: "chat" });
       rememberConversationTurn(context.userTranscript, message);
       return { message };
     } catch (error) {
+      if (isAbortError(error)) {
+        trace.add("agent.cancelled");
+        trace.end({ mode: "cancelled" });
+        return { message: STREAM_CANCELLED_MESSAGE };
+      }
       console.error("[aiko:agent] model call failed", formatAgentErrorForLog(error));
       const message = describeModelFallback();
-      onDelta?.(message);
+      emitDelta(message);
       trace.add("agent.failed");
       trace.end({ mode: "fallback" });
       rememberConversationTurn(context.userTranscript, message);
@@ -195,7 +233,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
   return {
     respond: (payload) => respondInternal(payload),
-    respondStream: (payload, onDelta) => respondInternal(payload, onDelta),
+    respondStream: (payload, onDelta, requestOptions) => respondInternal(payload, onDelta, requestOptions),
     listConversation,
     resetConversation
   };
@@ -291,6 +329,16 @@ function createDefaultAgentFactory(config: AppConfig, registry = createDefaultTo
 }
 
 // 判断用户是否明确要求开启新对话或清空当前上下文.
+// 根据配置创建默认网页检索器, 未启用 Tavily MCP 时保持纯本地聊天路径.
+function createDefaultWebRetriever(config: AppConfig | undefined): WebRetriever | undefined {
+  if (!config?.mcp.tavily.enabled) return undefined;
+  const provider = createTavilyWebSearchProvider(config.mcp.tavily);
+  return createWebRetriever({
+    provider,
+    maxResults: config.mcp.tavily.maxResults
+  });
+}
+
 export function isConversationResetRequest(payload: ChatPayload): boolean {
   if (payload.attachments.length > 0) return false;
   const text = normalizeConversationResetText(payload.text);
@@ -301,6 +349,7 @@ export function isConversationResetRequest(payload: ChatPayload): boolean {
   return (
     /(?:清空|删除|重置|忘掉|忘记).{0,8}(?:当前|现在|本轮|刚才|之前|前面)?(?:对话|上下文|聊天记录|聊天)/.test(text)
     || /(?:开启|开始|新建|开)(?:一个|一段|个|段)?新的?(?:对话|聊天|话题)/.test(text)
+    || /(?:新开|另开|另起)(?:一个|一段|个|段)?(?:新的?)?(?:对话|聊天|话题)/.test(text)
     || /^(?:我们)?(?:重新开始|从头开始|重开)(?:聊|聊天|对话)?$/.test(text)
     || /(?:重新开始|从头开始|另起|重开).{0,8}(?:聊|聊天|对话|话题)/.test(text)
     || /(?:换个|换一个|换段|换一段)新的?(?:话题|聊天|对话)/.test(text)
@@ -372,10 +421,10 @@ function createRoutedAgentInvoker(
   registry = createDefaultToolRegistry()
 ): AikoAgentInvoker {
   return {
-    async invoke(input) {
+    async invoke(input, options) {
       return invokeWithModelRoute(modelRoute, async (modelName, attemptActions) => {
         const agent = createLangChainAgentForModel(config, modelName, attemptActions, registry);
-        return agent.invoke(input);
+        return agent.invoke(input, options);
       }, proposedActions);
     },
     async *stream(input, options) {
@@ -691,17 +740,20 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
 async function runAgent(
   agent: AikoAgentInvoker,
   input: AgentInput,
-  onDelta?: (text: string) => void
+  onDelta?: (text: string) => void,
+  signal?: AbortSignal
 ): Promise<unknown> {
-  if (!onDelta || !agent.stream) return agent.invoke(input);
+  throwIfAborted(signal);
+  if (!onDelta || !agent.stream) return agent.invoke(input, createAgentRunOptions(signal));
 
   let latestText = "";
   let latestChunk: unknown = null;
 
-  const stream = await agent.stream(input, { streamMode: "values" });
+  const stream = await agent.stream(input, createAgentStreamOptions(signal));
   for await (const chunk of stream) {
+    throwIfAborted(signal);
     latestChunk = chunk;
-    const text = extractAssistantText(chunk);
+    const text = extractAssistantText(chunk, { streaming: true });
     if (!text || text === latestText) continue;
 
     if (text.startsWith(latestText)) {
@@ -713,7 +765,39 @@ async function runAgent(
     latestText = text;
   }
 
-  return latestChunk ?? agent.invoke(input);
+  throwIfAborted(signal);
+  return latestChunk ?? agent.invoke(input, createAgentRunOptions(signal));
+}
+
+// 为 LangChain invoke 构造运行选项, 让底层请求尽量响应 AbortSignal.
+function createAgentRunOptions(signal?: AbortSignal): AgentInvokeOptions | undefined {
+  return signal ? ({ signal } as AgentInvokeOptions) : undefined;
+}
+
+// 为 LangChain stream 构造运行选项, 保持 values 模式并透传 AbortSignal.
+function createAgentStreamOptions(signal?: AbortSignal): AgentStreamOptions {
+  return {
+    streamMode: "values",
+    ...(signal ? { signal } : {})
+  } as AgentStreamOptions;
+}
+
+// 如果请求已被中止, 立即打断当前 Runtime 流程.
+function throwIfAborted(signal?: AbortSignal) {
+  if (!isAbortSignalAborted(signal)) return;
+  const error = new Error("Aiko stream aborted");
+  error.name = "AbortError";
+  throw error;
+}
+
+// 统一判断 AbortSignal 状态, 避免各层重复空值检查.
+function isAbortSignalAborted(signal?: AbortSignal) {
+  return signal?.aborted === true;
+}
+
+// 判断异常是否来自显式中止, 这类情况不应记录为模型失败.
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 // 把回复文本和待确认动作合并为 IPC 可返回的结构.
@@ -732,7 +816,8 @@ export function shouldPreferDesktopMarkdownResponse(userText: string, userTransc
   const asksForDocument = /(?:生成|写|制定|整理|输出|起草|设计|做).{0,12}(?:一份|详细|具体|完整|系统|规划|计划|方案|文档|报告|清单|教程|大纲|路线图|总结)/.test(text);
   const documentNoun = /(?:规划|计划|方案|文档|报告|清单|教程|大纲|路线图|总结)/.test(text);
   const longSignal = /(?:一份|详细|具体|完整|长文|长一点|系统性|可执行|时间表|步骤)/.test(text);
-  return asksForDocument || (documentNoun && longSignal);
+  const broadDetailedAnswer = /(?:详细|具体|完整|系统(?:性)?|深入|展开|全面|长一点|多写点).{0,16}(?:讲|说|分析|解释|介绍|规划|优化|设计|整理|输出|写|展开)/.test(text);
+  return asksForDocument || broadDetailedAnswer || (documentNoun && longSignal);
 }
 
 // 根据模型正文生成写入桌面 Markdown 的待确认动作.
@@ -742,13 +827,14 @@ function createDesktopMarkdownAction(source: string, assistantText: string, pref
   if (!preferredByRequest && content.length < LONG_RESPONSE_MARKDOWN_THRESHOLD) return null;
 
   return {
-    title: "写入 Aiko回答.md",
+    title: "写入 回复.md",
     source: source.trim().slice(0, 1000) || "长篇回复",
     risk: "medium",
     capability: "write_desktop_markdown",
     target: DESKTOP_MARKDOWN_TARGET,
     params: {
-      title: "Aiko回答",
+      title: "回复",
+      autoExecute: true,
       content
     }
   };
@@ -789,7 +875,7 @@ function dedupeCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
 }
 
 // 从 LangChain 返回结构中提取最后一条 assistant 文本.
-export function extractAssistantText(result: unknown): string {
+export function extractAssistantText(result: unknown, options: AssistantTextExtractionOptions = {}): string {
   const messages = Array.isArray((result as { messages?: unknown[] }).messages)
     ? (result as { messages: unknown[] }).messages
     : [];
@@ -798,11 +884,63 @@ export function extractAssistantText(result: unknown): string {
     const role = readRole(message);
     if (role && role !== "assistant" && role !== "ai") continue;
 
-    const text = readContentText((message as { content?: unknown }).content);
+    const text = sanitizeAssistantText(readContentText((message as { content?: unknown }).content), options);
     if (text) return text;
   }
 
   return "";
+}
+
+// 清理模型误把回复写成多轮剧本的情况, 防止 Aiko 替用户自问自答.
+function sanitizeAssistantText(text: string, options: AssistantTextExtractionOptions = {}): string {
+  const withoutAssistantPrefix = maybeTrimDanglingRoleLabel(
+    text
+    .trim()
+    .replace(/^(?:Aiko|Assistant|assistant|助手)\s*[:：]\s*/i, "")
+    .trim(),
+    options
+  );
+  if (!withoutAssistantPrefix) return "";
+
+  const keptLines: string[] = [];
+  for (const line of withoutAssistantPrefix.replace(/\r\n/g, "\n").split("\n")) {
+    const truncatedLine = truncateRoleplayContinuation(line);
+    if (truncatedLine === null) break;
+    keptLines.push(truncatedLine);
+    if (truncatedLine !== line) break;
+  }
+
+  return keptLines.join("\n").trim();
+}
+
+// 截断模型自行续写的用户或助手角色台词, 同时覆盖行首和同一行中间两种形式.
+function truncateRoleplayContinuation(line: string): string | null {
+  const match = /(?:^|\s)(?:用户|User|user|Human|human|Aiko|Assistant|assistant|助手)\s*[:：]/.exec(line);
+  if (!match) return line;
+  const beforeRoleLabel = line.slice(0, match.index).trimEnd();
+  return beforeRoleLabel || null;
+}
+
+// 流式输出时, 角色标签可能先吐出半截, 这里先缓冲, 防止 UI 显示无法撤回的残片.
+function maybeTrimDanglingRoleLabel(text: string, options: AssistantTextExtractionOptions): string {
+  if (!options.streaming) return text;
+
+  const trimmedEnd = text.trimEnd();
+  for (const label of ["用户", "User", "user", "Human", "human", "Aiko", "Assistant", "assistant", "助手"]) {
+    for (let length = 1; length <= label.length; length += 1) {
+      const partial = escapeRegExp(label.slice(0, length));
+      const match = new RegExp(`(?:^|\\s)${partial}$`).exec(trimmedEnd);
+      if (!match) continue;
+      return trimmedEnd.slice(0, match.index).trimEnd();
+    }
+  }
+
+  return text;
+}
+
+// 转义动态正则片段, 用于安全匹配角色标签前缀.
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // 读取不同消息对象里的角色字段.

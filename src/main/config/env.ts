@@ -7,9 +7,25 @@ export type AppConfig = {
     fallbackModels: string[];
     apiKey: string;
   };
+  mcp: {
+    tavily: {
+      enabled: boolean;
+      mode: "stdio" | "remote";
+      apiKey: string;
+      apiKeys: string[];
+      remoteUrl: string;
+      packageName: string;
+      maxResults: number;
+      timeoutMs: number;
+    };
+  };
 };
 
 const DEFAULT_GLM_FALLBACK_MODELS = ["glm-4v-flash"];
+const DEFAULT_TAVILY_MCP_PACKAGE = "tavily-mcp@0.2.19";
+const DEFAULT_TAVILY_REMOTE_URL = "https://mcp.tavily.com/mcp/";
+const DEFAULT_TAVILY_MAX_RESULTS = 5;
+const DEFAULT_TAVILY_TIMEOUT_MS = 15000;
 
 // 从环境变量解析应用运行所需的模型配置.
 export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
@@ -17,6 +33,7 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
   const model = readRequired(env, "GLM_MODEL");
   const fallbackModels = readFallbackModels(env, model);
   const apiKey = readRequired(env, "GLM_API_KEY");
+  const tavily = readTavilyMcpConfig(env);
 
   return {
     glm: {
@@ -24,6 +41,9 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
       model,
       fallbackModels,
       apiKey
+    },
+    mcp: {
+      tavily
     }
   };
 }
@@ -60,4 +80,86 @@ function readFallbackModels(env: NodeJS.ProcessEnv, primaryModel: string): strin
   }
 
   return fallbackModels;
+}
+
+// 读取 Tavily MCP 配置, 默认关闭, 避免没有 API key 时影响本地桌宠启动.
+function readTavilyMcpConfig(env: NodeJS.ProcessEnv): AppConfig["mcp"]["tavily"] {
+  const enabled = readBoolean(env, "MCP_TAVILY_ENABLED", false);
+  const mode = readTavilyMode(env.MCP_TAVILY_MODE);
+  const apiKeys = readTavilyApiKeys(env, enabled);
+  const apiKey = apiKeys[0] ?? "";
+
+  return {
+    enabled,
+    mode,
+    apiKey,
+    apiKeys,
+    remoteUrl: readOptional(env, "MCP_TAVILY_REMOTE_URL") || DEFAULT_TAVILY_REMOTE_URL,
+    packageName: readOptional(env, "MCP_TAVILY_PACKAGE") || DEFAULT_TAVILY_MCP_PACKAGE,
+    maxResults: readPositiveInteger(env, "MCP_TAVILY_MAX_RESULTS", DEFAULT_TAVILY_MAX_RESULTS),
+    timeoutMs: readPositiveInteger(env, "MCP_TAVILY_TIMEOUT_MS", DEFAULT_TAVILY_TIMEOUT_MS)
+  };
+}
+
+// 读取 Tavily API key 列表, 优先使用 TAVILY_API_KEYS, 并兼容旧的 TAVILY_API_KEY.
+function readTavilyApiKeys(env: NodeJS.ProcessEnv, enabled: boolean): string[] {
+  const rawValues = [readOptional(env, "TAVILY_API_KEYS"), readOptional(env, "TAVILY_API_KEY")].filter(Boolean);
+  const keys = dedupeStrings(
+    rawValues.flatMap((value) =>
+      value
+        .split(/[,\s;]+/)
+        .map((key) => key.trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (enabled && keys.length === 0) {
+    throw new Error("Missing required environment variable: TAVILY_API_KEY or TAVILY_API_KEYS");
+  }
+
+  return keys;
+}
+
+// 按原始顺序去重字符串, 保证 key 轮询顺序可预测.
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+// 读取可选字符串, 空字符串会被视为未配置.
+function readOptional(env: NodeJS.ProcessEnv, name: string): string {
+  return env[name]?.trim() ?? "";
+}
+
+// 读取布尔型环境变量, 支持常见开关写法.
+function readBoolean(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const value = readOptional(env, name).toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new Error(`Invalid boolean environment variable: ${name}`);
+}
+
+// 读取 Tavily MCP 连接方式, 当前支持本地 stdio 和远程 HTTP.
+function readTavilyMode(value: string | undefined): "stdio" | "remote" {
+  const normalized = value?.trim().toLowerCase() || "stdio";
+  if (normalized === "stdio" || normalized === "remote") return normalized;
+  throw new Error("Invalid MCP_TAVILY_MODE, expected stdio or remote");
+}
+
+// 读取正整数配置, 避免超时和结果数量被配置成不可用值.
+function readPositiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const value = readOptional(env, name);
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid positive integer environment variable: ${name}`);
+  }
+  return parsed;
 }

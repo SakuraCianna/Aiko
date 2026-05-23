@@ -4,6 +4,7 @@ export const MAX_CHAT_TEXT_LENGTH = 4000;
 export const MAX_ATTACHMENTS = 4;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+export const MAX_ATTACHMENT_DATA_URL_LENGTH = Math.ceil(MAX_AUDIO_BYTES / 3) * 4 + 128;
 
 const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 const audioMimeTypes = ["audio/mpeg", "audio/wav", "audio/webm", "audio/ogg", "audio/mp4"] as const;
@@ -37,6 +38,14 @@ const attachmentSchema = z
     const allowedMimeTypes = attachment.kind === "image" ? imageMimeTypes : audioMimeTypes;
     const maxBytes = attachment.kind === "image" ? MAX_IMAGE_BYTES : MAX_AUDIO_BYTES;
 
+    if (attachment.dataUrl.length > MAX_ATTACHMENT_DATA_URL_LENGTH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Attachment data URL is too large"
+      });
+      return;
+    }
+
     if (!allowedMimeTypes.includes(attachment.mimeType as never)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -51,7 +60,16 @@ const attachmentSchema = z
       });
     }
 
-    if (!attachment.dataUrl.startsWith(`data:${attachment.mimeType};base64,`)) {
+    const dataUrlPrefix = `data:${attachment.mimeType};base64,`;
+    if (attachment.dataUrl.length > dataUrlPrefix.length + Math.ceil(maxBytes / 3) * 4) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${attachment.kind} attachment data URL is too large`
+      });
+      return;
+    }
+
+    if (!attachment.dataUrl.startsWith(dataUrlPrefix)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Attachment data URL does not match MIME type"
@@ -59,7 +77,7 @@ const attachmentSchema = z
       return;
     }
 
-    const actualBytes = decodedBase64ByteLength(attachment.dataUrl.slice(`data:${attachment.mimeType};base64,`.length));
+    const actualBytes = decodedBase64ByteLength(attachment.dataUrl.slice(dataUrlPrefix.length));
     if (actualBytes === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

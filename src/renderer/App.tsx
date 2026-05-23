@@ -10,6 +10,7 @@ import { PanelShell } from "./components/PanelShell";
 import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { isCancellationCommand } from "./chat/cancelCommand";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
 
 // 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
@@ -36,6 +37,8 @@ export function App() {
     });
 
     return () => {
+      const activeRequestId = activeStreamIdRef.current;
+      if (activeRequestId) void window.aiko.cancelStream(activeRequestId);
       unsubscribeStreamDeltas();
       speechControllerRef.current?.cancel();
       speechControllerRef.current = null;
@@ -52,6 +55,12 @@ export function App() {
 
   // 发送用户输入到主进程 Agent, 并接收流式回复.
   async function handleCommand(payload: ChatPayload) {
+    if (payload.attachments.length === 0 && isCancellationCommand(payload.text)) {
+      cancelActiveResponse();
+      return;
+    }
+
+    cancelPreviousResponseBeforeNewRequest();
     const requestId = crypto.randomUUID();
     activeStreamIdRef.current = requestId;
     setPendingAction(null);
@@ -93,6 +102,39 @@ export function App() {
       speakAiko(fallbackMessage, "idle");
       showControls();
     }
+  }
+
+  // 中止当前流式回复, 同时停止 UI 增量, 主进程请求和语音播放.
+  function cancelActiveResponse() {
+    const requestId = activeStreamIdRef.current;
+    activeStreamIdRef.current = null;
+    setPendingAction(null);
+    speechControllerRef.current?.cancel();
+
+    if (requestId) {
+      void window.aiko.cancelStream(requestId);
+      const cancelMessage = "已中止. 我先停下.";
+      setMessage(cancelMessage);
+      setCharacterBehaviorNow("idle");
+      requestCharacterMotion("shake");
+      showControls();
+      return;
+    }
+
+    const idleMessage = "现在没有正在输出的回复.";
+    setMessage(idleMessage);
+    setCharacterBehaviorNow("idle");
+    showControls();
+  }
+
+  // 新请求开始前安静取消旧请求, 避免旧模型流继续占用调用或留下过期动作.
+  function cancelPreviousResponseBeforeNewRequest() {
+    const previousRequestId = activeStreamIdRef.current;
+    if (!previousRequestId) return;
+
+    activeStreamIdRef.current = null;
+    void window.aiko.cancelStream(previousRequestId);
+    speechControllerRef.current?.cancel();
   }
 
   // 执行当前待确认动作, 可选择是否记住授权.

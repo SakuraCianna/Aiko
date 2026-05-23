@@ -8,7 +8,8 @@ import {
   createAikoAgentRuntime,
   extractAssistantText,
   isRetryableModelRouteError,
-  isConversationResetRequest
+  isConversationResetRequest,
+  shouldPreferDesktopMarkdownResponse
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
@@ -41,6 +42,8 @@ describe("Aiko persona prompt", () => {
     expect(prompt).toContain("语气指纹");
     expect(prompt).toContain("不要为了显得安全而变成冷冰冰的客服腔");
     expect(prompt).toContain("温和,敏锐");
+    expect(prompt).toContain("不要替用户继续写台词");
+    expect(prompt).toContain("不要输出以 用户: 或 Aiko: 开头的多轮剧本");
   });
 });
 
@@ -64,6 +67,11 @@ describe("createAikoAgentRuntime", () => {
 
     expect(isRetryableModelRouteError(error)).toBe(true);
     expect(isRetryableModelRouteError(Object.assign(new Error("401"), { status: 401 }))).toBe(false);
+  });
+
+  it("pre-buffers broad detailed-answer requests for desktop markdown", () => {
+    expect(shouldPreferDesktopMarkdownResponse("请详细展开讲讲这个项目后续怎么优化")).toBe(true);
+    expect(shouldPreferDesktopMarkdownResponse("随便聊两句")).toBe(false);
   });
 
   it("proposes low-risk application actions without calling the model", async () => {
@@ -325,7 +333,7 @@ describe("createAikoAgentRuntime", () => {
     await runtime.respond(textPayload("今晚我想先复习英语"));
     expect(runtime.listConversation().messages.length).toBeGreaterThan(0);
 
-    const response = await runtime.respond(textPayload("开启新对话"));
+    const response = await runtime.respond(textPayload("我说我们开启一个新的对话吧"));
 
     expect(response.message).toContain("当前对话上下文已清空");
     expect(response.message).toContain("长期记忆仍然保留");
@@ -337,6 +345,9 @@ describe("createAikoAgentRuntime", () => {
   it("detects natural requests to start a fresh conversation", () => {
     const resetPhrases = [
       "我们开始一段新的聊天吧",
+      "我说我们开启一个新的对话吧",
+      "我们新开一段对话吧",
+      "另开一个聊天",
       "重新开始聊吧",
       "换个新话题",
       "这段先到这里, 我们开个新的对话",
@@ -567,6 +578,97 @@ describe("createAikoAgentRuntime", () => {
     expect(deltas).toEqual(["好的", ",我来安排."]);
   });
 
+  it("does not leak partial roleplay labels while streaming", async () => {
+    const deltas: string[] = [];
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          throw new Error("stream should be used");
+        },
+        async *stream() {
+          yield { messages: [{ role: "assistant", content: "hi\n\u7528" }] };
+          yield { messages: [{ role: "assistant", content: "hi\n\u7528\u6237: should not appear" }] };
+        }
+      }
+    });
+
+    const response = await runtime.respondStream(textPayload("hello"), (delta) => deltas.push(delta));
+
+    expect(response).toEqual({ message: "hi" });
+    expect(deltas).toEqual(["hi"]);
+  });
+
+  it("strips model-generated user roleplay continuations from assistant replies", async () => {
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return {
+            messages: [
+              {
+                role: "assistant",
+                content: "你好, 我在这里。\n用户: 很高兴认识你\nAiko: 我也很高兴认识你"
+              }
+            ]
+          };
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("你好"));
+
+    expect(response.message).toBe("你好, 我在这里。");
+  });
+
+  it("strips inline roleplay continuations from assistant replies", async () => {
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return {
+            messages: [
+              {
+                role: "assistant",
+                content: "你好, 我在这里。 用户: 很高兴认识你 Aiko: 我也很高兴认识你"
+              }
+            ]
+          };
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("你好"));
+
+    expect(response.message).toBe("你好, 我在这里。");
+  });
+
+  it("stops streaming when the abort signal is triggered", async () => {
+    const controller = new AbortController();
+    const deltas: string[] = [];
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: "不应该回退到 invoke" }] };
+        },
+        async *stream() {
+          yield { messages: [{ role: "assistant", content: "第一段" }] };
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          yield { messages: [{ role: "assistant", content: "第一段第二段" }] };
+        }
+      }
+    });
+
+    const response = await runtime.respondStream(
+      textPayload("讲长一点"),
+      (delta) => {
+        deltas.push(delta);
+        controller.abort();
+      },
+      { signal: controller.signal }
+    );
+
+    expect(response).toEqual({ message: "已中止. 我先停下." });
+    expect(deltas).toEqual(["第一段"]);
+  });
+
   it("turns long-form planning requests into a desktop markdown action without streaming the full draft", async () => {
     const deltas: string[] = [];
     const markdown = "# 学习规划\n\n## 目标\n\n把今天的任务拆成三段, 每段都有明确产出.";
@@ -588,13 +690,39 @@ describe("createAikoAgentRuntime", () => {
     expect(deltas).toEqual([]);
     expect(response.message).toContain("Markdown");
     expect(response.pendingAction).toMatchObject({
-      title: "写入 Aiko回答.md",
+      title: "写入 回复.md",
       risk: "medium",
       capability: "write_desktop_markdown",
       target: "Desktop/Aiko",
       params: {
-        title: "Aiko回答",
+        title: "回复",
+        autoExecute: true,
         content: markdown
+      }
+    });
+  });
+
+  it("turns unexpectedly long assistant replies into an auto desktop markdown action", async () => {
+    const longReply = `# 深度分析\n\n${"这是一段需要放进文件里的长回复。".repeat(90)}`;
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return {
+            messages: [{ role: "assistant", content: longReply }]
+          };
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("你怎么看这件事"));
+
+    expect(response.pendingAction).toMatchObject({
+      capability: "write_desktop_markdown",
+      target: "Desktop/Aiko",
+      params: {
+        title: "回复",
+        autoExecute: true,
+        content: longReply
       }
     });
   });

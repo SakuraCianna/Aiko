@@ -8,6 +8,7 @@ export function createPetWindow(preloadPath: string): BrowserWindow {
   const win = new BrowserWindow(createPetWindowOptions(preloadPath, primaryDisplay.workAreaSize));
 
   restorePetWindowChrome(win);
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   win.on("show", () => console.log("[aiko:window] pet window shown"));
   win.on("hide", () => console.warn("[aiko:window] pet window hidden"));

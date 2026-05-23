@@ -67,9 +67,16 @@ describe("renderer layout CSS", () => {
 
   it("guards stream completion so stale responses cannot overwrite newer requests", () => {
     const app = readFileSync("src/renderer/App.tsx", "utf8");
+    const preload = readFileSync("src/main/preload.ts", "utf8");
+    const sharedTypes = readFileSync("src/shared/ipcTypes.ts", "utf8");
 
     expect(app).toContain("isActiveRequest");
     expect(app).toContain("if (!isActiveRequest(requestId)) return");
+    expect(app).toContain("isCancellationCommand");
+    expect(app).toContain("cancelActiveResponse");
+    expect(app).toContain("cancelPreviousResponseBeforeNewRequest");
+    expect(preload).toContain("chat:cancel-stream");
+    expect(sharedTypes).toContain("cancelStream");
   });
 
   it("preserves pending action choices so generic app requests show selectable apps", () => {

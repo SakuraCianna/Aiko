@@ -14,6 +14,8 @@ const api: AikoApi = {
   sendMessage: (payload) => ipcRenderer.invoke("chat:send-message", payload),
   // 发送一次流式聊天请求.
   streamMessage: (requestId, payload) => ipcRenderer.invoke("chat:stream-message", requestId, payload),
+  // 取消指定流式聊天请求.
+  cancelStream: (requestId) => ipcRenderer.invoke("chat:cancel-stream", requestId),
   // 订阅聊天流式增量事件.
   onChatStreamDelta: (listener) => {
     // 把主进程流式消息转成渲染层回调.

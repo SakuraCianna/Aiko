@@ -6,6 +6,7 @@ import { discoverApplications } from "../capabilities/applicationCatalog";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import { isAutoExecutableDesktopMarkdownAction } from "./localActionPolicy";
 import type {
   ApplicationPreferenceRepository,
   MemoryRepository,
@@ -36,6 +37,7 @@ const PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
 // 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const pendingActions = new Map<string, PendingActionEntry>();
+  const streamControllers = new Map<string, AbortController>();
   const getApplications = deps.applicationProvider ?? (() => discoverApplications());
   const writeDesktopMarkdown = createDesktopMarkdownWriter();
   const actionExecutor = createActionExecutor({
@@ -100,14 +102,37 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     }
     if (isConversationResetRequest(payload)) pendingActions.clear();
 
+    abortPreviousStreamController(requestId);
+    const abortController = new AbortController();
+    streamControllers.set(requestId, abortController);
     try {
       const response = await deps.agentRuntime.respondStream(payload, (text) => {
+        if (abortController.signal.aborted) return;
         sendStreamDelta(event.sender, requestId, text);
-      });
+      }, { signal: abortController.signal });
       return respondWithLocalAction(response.message, response.pendingAction);
     } catch {
       return { message: "我这边暂时没有收到回复,但本地功能还在." };
+    } finally {
+      if (streamControllers.get(requestId) === abortController) {
+        streamControllers.delete(requestId);
+      }
     }
+  });
+
+  ipcMain.handle("chat:cancel-stream", (_event, requestId: unknown) => {
+    if (typeof requestId !== "string" || requestId.length === 0) {
+      return { ok: false, message: "这个中止请求缺少有效 ID." };
+    }
+
+    const controller = streamControllers.get(requestId);
+    if (!controller) {
+      return { ok: false, message: "没有找到正在输出的回复." };
+    }
+
+    controller.abort();
+    streamControllers.delete(requestId);
+    return { ok: true, message: "已中止当前回复." };
   });
 
   ipcMain.handle("action:execute", async (_event, request: unknown) => {
@@ -196,6 +221,11 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
     if (!isSupportedAction(action)) return { message };
 
+    if (isAutoExecutableDesktopMarkdownAction(action)) {
+      const result = await actionExecutor.execute({ action, remember: false });
+      return { message: result.message };
+    }
+
     if (action.capability === "open_application") {
       const decision = resolveOpenApplicationAction(action, getApplications(), {
         defaultApplicationTarget: deps.applicationPreferenceRepository?.getDefaultApplication(action.target)
@@ -266,6 +296,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     removeExpiredPendingActions(pendingActions, Date.now());
     pendingActions.set(actionId, { action: pendingAction, createdAt: Date.now() });
     return pendingAction;
+  }
+
+  // 同一个 requestId 重入时先中止旧流, 避免旧请求失去 controller 后继续后台运行.
+  function abortPreviousStreamController(requestId: string) {
+    const previousController = streamControllers.get(requestId);
+    if (!previousController) return;
+    previousController.abort();
+    streamControllers.delete(requestId);
   }
 }
 

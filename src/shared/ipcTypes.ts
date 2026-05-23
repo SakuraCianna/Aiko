@@ -111,6 +111,7 @@ export type AikoApi = {
   openPanel: (panel: PanelName) => Promise<void>;
   sendMessage: (payload: ChatPayload) => Promise<ChatResponse>;
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
+  cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
   listConversation: () => Promise<ConversationSnapshotDto>;

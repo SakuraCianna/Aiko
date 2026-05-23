@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_IMAGE_BYTES, validateChatPayload } from "../../src/shared/chatPayload";
+import { MAX_ATTACHMENT_DATA_URL_LENGTH, MAX_IMAGE_BYTES, validateChatPayload } from "../../src/shared/chatPayload";
 
 describe("validateChatPayload", () => {
   it("accepts text with image and audio attachments", () => {
@@ -77,6 +77,26 @@ describe("validateChatPayload", () => {
             mimeType: "image/png",
             size: 1,
             dataUrl: "data:image/png;base64,AAAA"
+          }
+        ]
+      })
+    ).toThrow();
+  });
+
+  it("rejects overlong data URL strings before attachment decoding work grows unbounded", () => {
+    expect(MAX_ATTACHMENT_DATA_URL_LENGTH).toBeGreaterThan(MAX_IMAGE_BYTES);
+
+    expect(() =>
+      validateChatPayload({
+        text: "",
+        attachments: [
+          {
+            id: "overlong-1",
+            kind: "image",
+            name: "overlong.png",
+            mimeType: "image/png",
+            size: 1,
+            dataUrl: `data:image/png;base64,${"A".repeat(MAX_ATTACHMENT_DATA_URL_LENGTH + 1)}`
           }
         ]
       })

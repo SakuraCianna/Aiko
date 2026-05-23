@@ -3,6 +3,7 @@ import type { PendingActionDto } from "../../shared/ipcTypes";
 import type { RecalledMemory } from "../memory/memoryRecall";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { SpeechUnderstandingResult } from "../voice/voiceTypes";
+import type { WebResearchContext } from "./retriever/webTypes";
 
 export type AgentTextPart = { type: "text"; text: string };
 export type AgentImagePart = { type: "image_url"; image_url: { url: string } };
@@ -23,6 +24,7 @@ export type RetrievedContext = {
   attachmentSummaries: AttachmentSummary[];
   memories: RecalledMemory[];
   speechResults: SpeechUnderstandingResult[];
+  webResearch: WebResearchContext | null;
   toolHints: ToolHint[];
 };
 

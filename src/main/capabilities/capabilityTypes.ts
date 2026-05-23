@@ -3,15 +3,13 @@ export type RiskLevel = "low" | "medium" | "high";
 export type CapabilityName =
   | "open_application"
   | "open_url"
-  | "open_configured_path"
   | "create_reminder"
   | "cancel_reminder"
   | "set_default_application"
-  | "write_desktop_markdown"
-  | "shell_command";
+  | "write_desktop_markdown";
 
 export type CapabilityRequest = {
-  capability: CapabilityName;
+  capability: string;
   target: string;
   risk: RiskLevel;
 };

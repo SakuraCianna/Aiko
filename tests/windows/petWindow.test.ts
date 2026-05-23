@@ -27,5 +27,18 @@ describe("isAllowedDevServerUrl", () => {
     expect(petWindow).toContain("setMenuBarVisibility(false)");
     expect(petWindow).toContain("enforcePetWindowSize");
     expect(petWindow).toContain("setBackgroundColor(\"#00000000\")");
+    expect(petWindow).toContain("setWindowOpenHandler");
+  });
+
+  it("sets a renderer content security policy without unsafe eval", () => {
+    const devHtml = readFileSync("index.html", "utf8");
+    const packagedHtml = readFileSync("src/renderer/index.html", "utf8");
+
+    for (const html of [devHtml, packagedHtml]) {
+      expect(html).toContain("Content-Security-Policy");
+      expect(html).toContain("default-src 'self'");
+      expect(html).toContain("connect-src 'self' blob: data:");
+      expect(html).not.toContain("unsafe-eval");
+    }
   });
 });
