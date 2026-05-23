@@ -38,6 +38,14 @@ describe("Aiko agent architecture boundary", () => {
     expect(ipcHandlers).toContain("createdAt");
   });
 
+  it("clears pending local actions when the current conversation is reset", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("isConversationResetRequest");
+    expect(ipcHandlers).toContain("conversation:reset");
+    expect(ipcHandlers).toContain("pendingActions.clear()");
+  });
+
   it("documents that future agent work must extend the LangChain runtime", () => {
     const architectureDoc = join("docs", "agent-architecture.md");
 

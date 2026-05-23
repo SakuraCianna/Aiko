@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { runMigrations } from "../../src/main/database/migrations";
 import {
+  createApplicationPreferenceRepository,
   createMemoryRepository,
   createPermissionRepository,
   createReminderRepository
@@ -40,6 +41,19 @@ describe("database repositories", () => {
         target: "CHROME"
       })
     ).toBe(true);
+
+    db.close();
+  });
+
+  it("persists default application preferences in settings", () => {
+    const db = createMemoryDatabase();
+    const repository = createApplicationPreferenceRepository(db);
+
+    repository.setDefaultApplication("浏览器", "Google Chrome");
+    expect(repository.getDefaultApplication("浏览器")).toBe("Google Chrome");
+
+    repository.setDefaultApplication("浏览器", "Microsoft Edge");
+    expect(repository.getDefaultApplication("浏览器")).toBe("Microsoft Edge");
 
     db.close();
   });

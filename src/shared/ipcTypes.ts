@@ -2,7 +2,7 @@ import type { ChatPayload } from "./chatPayload";
 
 export type PanelName = "chat" | "reminders" | "memory" | "settings";
 
-export type PendingActionDto = {
+export type PendingActionBaseDto = {
   id?: string;
   title: string;
   source: string;
@@ -10,6 +10,17 @@ export type PendingActionDto = {
   capability: string;
   target: string;
   params?: Record<string, string | number | boolean>;
+};
+
+export type PendingActionChoiceDto = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  action: PendingActionBaseDto & { id: string };
+};
+
+export type PendingActionDto = PendingActionBaseDto & {
+  choices?: PendingActionChoiceDto[];
 };
 
 export type ExecuteActionRequest = {
@@ -30,11 +41,6 @@ export type ChatResponse = {
 export type ChatStreamDelta = {
   requestId: string;
   text: string;
-};
-
-export type WindowDragPoint = {
-  screenX: number;
-  screenY: number;
 };
 
 export type CursorState = {
@@ -72,18 +78,29 @@ export type MemorySnapshotDto = {
   pendingCandidates: MemoryCandidateDto[];
 };
 
+export type ConversationMessageDto = {
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
+
+export type ConversationSnapshotDto = {
+  messages: ConversationMessageDto[];
+  maxMessages: number;
+  maxContextChars: number;
+};
+
 export type AikoApi = {
   ping: () => Promise<{ ok: true; value: "pong" }>;
   setClickThrough: (enabled: boolean) => Promise<void>;
   getCursorState: () => Promise<CursorState>;
-  startWindowDrag: (point: WindowDragPoint) => Promise<void>;
-  moveWindowDrag: (point: WindowDragPoint) => Promise<void>;
-  endWindowDrag: () => Promise<void>;
   openPanel: (panel: PanelName) => Promise<void>;
   sendMessage: (payload: ChatPayload) => Promise<ChatResponse>;
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
+  listConversation: () => Promise<ConversationSnapshotDto>;
+  resetConversation: () => Promise<ConversationSnapshotDto>;
   listMemory: () => Promise<MemorySnapshotDto>;
   acceptMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
   rejectMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;

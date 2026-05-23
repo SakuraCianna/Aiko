@@ -63,6 +63,19 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     planOnly: true
   },
   {
+    name: "write_desktop_markdown",
+    description: "提出把长篇回复写入桌面 Aiko 文件夹 Markdown 文件的待确认动作.只生成动作,不执行.",
+    capability: "write_desktop_markdown",
+    risk: "medium",
+    requiresConfirmation: true,
+    schema: {
+      title: "string",
+      content: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
     name: "recall_memory",
     description: "查询本地长期记忆.只用于上下文检索,不执行系统操作.",
     capability: "recall_memory",

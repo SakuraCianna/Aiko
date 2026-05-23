@@ -5,6 +5,12 @@ import { createAgent, tool } from "langchain";
 import { z } from "zod";
 import type { ChatPayload } from "../../shared/chatPayload";
 import type { ChatResponse, PendingActionDto } from "../../shared/ipcTypes";
+import {
+  describePendingAction,
+  describeEmptyAssistantReply,
+  describeModelFallback,
+  describeModelProposedAction
+} from "../ai/aikoVoice";
 import { buildAikoSystemPrompt, MEMORY_EXTRACTION_PROMPT } from "../ai/prompts";
 import type { AppConfig } from "../config/env";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
@@ -15,7 +21,7 @@ import { buildSearchUrl, createAikoPlanner } from "./planner/aikoPlanner";
 import { createAikoRetriever } from "./retriever/aikoRetriever";
 import { createDefaultToolRegistry } from "./tools/toolRegistry";
 import { createAikoTraceRecorder } from "./trace/aikoTrace";
-import type { AikoMemoryRuntime } from "./types";
+import type { AgentUserContent, AikoMemoryRuntime } from "./types";
 import type { AikoTraceRecorder } from "./trace/aikoTrace";
 
 type AgentInput = { messages: BaseMessageLike[] };
@@ -23,6 +29,8 @@ type LangChainAgent = ReturnType<typeof createAgent>;
 type AgentStreamOptions = Parameters<LangChainAgent["stream"]>[1];
 
 export const AIKO_CHAT_TEMPERATURE = 0.3;
+const LONG_RESPONSE_MARKDOWN_THRESHOLD = 1200;
+const DESKTOP_MARKDOWN_TARGET = "Desktop/Aiko";
 
 export type AikoAgentInvoker = {
   invoke: (input: AgentInput) => Promise<unknown>;
@@ -34,9 +42,23 @@ export type AikoAgentFactory = (proposedActions: PendingActionDto[]) => AikoAgen
 export type AikoAgentRuntime = {
   respond: (payload: ChatPayload) => Promise<ChatResponse>;
   respondStream: (payload: ChatPayload, onDelta: (text: string) => void) => Promise<ChatResponse>;
+  listConversation: () => ConversationSnapshot;
+  resetConversation: () => ConversationSnapshot;
 };
 
 export type MemoryCandidateExtractor = (transcript: string) => Promise<MemoryCandidate[]>;
+
+export type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
+
+export type ConversationSnapshot = {
+  messages: ConversationMessage[];
+  maxMessages: number;
+  maxContextChars: number;
+};
 
 export type AikoAgentRuntimeOptions = {
   config?: AppConfig;
@@ -46,10 +68,15 @@ export type AikoAgentRuntimeOptions = {
   memoryRuntime?: AikoMemoryRuntime;
   memoryCandidateExtractor?: MemoryCandidateExtractor;
   traceRecorder?: AikoTraceRecorder;
+  maxConversationMessages?: number;
+  maxConversationContextChars?: number;
 };
 
 // 创建 Aiko 的运行时入口, 负责把消息, 工具, 记忆和语音结果串起来.
 export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAgentRuntime {
+  const maxConversationMessages = options.maxConversationMessages ?? 12;
+  const maxConversationContextChars = options.maxConversationContextChars ?? 6000;
+  const conversationMessages: ConversationMessage[] = [];
   const speechUnderstandingProvider =
     options.speechUnderstandingProvider;
   const toolRegistry = createDefaultToolRegistry();
@@ -71,6 +98,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
   // 处理一次普通或流式聊天请求.
   async function respondInternal(payload: ChatPayload, onDelta?: (text: string) => void): Promise<ChatResponse> {
+    if (isConversationResetRequest(payload)) {
+      resetConversation();
+      const message = "已开启新对话. 当前对话上下文已清空, 长期记忆仍然保留.";
+      onDelta?.(message);
+      return { message };
+    }
+
     const trace = traceRecorder.start();
     const context = await retriever.retrieve(payload);
     trace.add("retriever.completed", {
@@ -96,6 +130,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         risk: proposal.action.risk
       });
       trace.end({ mode: "action" });
+      rememberConversationTurn(context.userTranscript, proposal.message);
       return respondWithAction(proposal.message, proposal.action);
     }
 
@@ -103,6 +138,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       onDelta?.(proposal.message);
       trace.add("executor.blocked");
       trace.end({ mode: "blocked" });
+      rememberConversationTurn(context.userTranscript, proposal.message);
       return { message: proposal.message };
     }
 
@@ -110,9 +146,10 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     try {
       const agent = createRequestAgent(options, defaultAgentFactory, proposedActions);
       const input = {
-        messages: [new HumanMessage({ content: context.userContent })]
+        messages: [new HumanMessage({ content: withConversationContext(context.userContent) })]
       };
-      const result = await runAgent(agent, input, onDelta);
+      const prefersDesktopMarkdown = shouldPreferDesktopMarkdownResponse(context.userText, context.userTranscript);
+      const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : onDelta);
       const assistantText = extractAssistantText(result);
       const action = proposedActions.at(-1);
       trace.add("agent.completed", {
@@ -122,31 +159,99 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
       // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
       if (action) {
-        const message = "我可以帮你准备这个操作,执行前需要你确认.";
+        const message = describeModelProposedAction(action);
         if (!assistantText) onDelta?.(message);
         await rememberExchange(runtimeOptions, context.userTranscript, assistantText || message);
         trace.end({ mode: "tool_action" });
+        rememberConversationTurn(context.userTranscript, assistantText || message);
         return respondWithAction(message, action);
       }
 
-      const message = assistantText || "我听到了,但这次没有生成有效回复.";
+      const markdownAction = createDesktopMarkdownAction(context.userTranscript || context.userText, assistantText, prefersDesktopMarkdown);
+      if (markdownAction) {
+        const message = describePendingAction(markdownAction);
+        await rememberExchange(runtimeOptions, context.userTranscript, assistantText);
+        trace.end({ mode: "markdown_action" });
+        rememberConversationTurn(context.userTranscript, message);
+        return respondWithAction(message, markdownAction);
+      }
+
+      const message = assistantText || describeEmptyAssistantReply();
       if (!assistantText) onDelta?.(message);
       await rememberExchange(runtimeOptions, context.userTranscript, message);
       trace.end({ mode: "chat" });
+      rememberConversationTurn(context.userTranscript, message);
       return { message };
     } catch {
-      const message = "我现在连不上大模型,但本地提醒,打开应用这类简单操作还可以继续处理.";
+      const message = describeModelFallback();
       onDelta?.(message);
       trace.add("agent.failed");
       trace.end({ mode: "fallback" });
+      rememberConversationTurn(context.userTranscript, message);
       return { message };
     }
   }
 
   return {
     respond: (payload) => respondInternal(payload),
-    respondStream: (payload, onDelta) => respondInternal(payload, onDelta)
+    respondStream: (payload, onDelta) => respondInternal(payload, onDelta),
+    listConversation,
+    resetConversation
   };
+
+  // 将当前短期上下文注入模型输入, 不影响长期记忆.
+  function withConversationContext(userContent: AgentUserContent): AgentUserContent {
+    const contextText = formatConversationContext(conversationMessages, maxConversationContextChars);
+    if (!contextText) return userContent;
+
+    if (typeof userContent === "string") {
+      return [contextText, userContent].join("\n\n");
+    }
+
+    const [firstPart, ...otherParts] = userContent;
+    if (firstPart?.type === "text") {
+      return [
+        {
+          ...firstPart,
+          text: [contextText, firstPart.text].filter(Boolean).join("\n\n")
+        },
+        ...otherParts
+      ];
+    }
+
+    return [{ type: "text", text: contextText }, ...userContent];
+  }
+
+  // 把一轮用户输入和 Aiko 回复写入短期上下文.
+  function rememberConversationTurn(userTranscript: string, assistantText: string) {
+    const userContent = normalizeConversationContent(userTranscript);
+    const assistantContent = normalizeConversationContent(assistantText);
+    if (!userContent && !assistantContent) return;
+
+    const createdAt = new Date().toISOString();
+    if (userContent) {
+      conversationMessages.push({ role: "user", content: userContent, createdAt });
+    }
+    if (assistantContent) {
+      conversationMessages.push({ role: "assistant", content: assistantContent, createdAt });
+    }
+    trimConversationMessages(conversationMessages, maxConversationMessages);
+  }
+
+  // 返回当前短期上下文快照, 供管理面板展示.
+  function listConversation(): ConversationSnapshot {
+    return {
+      messages: conversationMessages.map((message) => ({ ...message })),
+      maxMessages: maxConversationMessages,
+      maxContextChars: maxConversationContextChars
+    };
+  }
+
+  // 清空当前短期上下文, 不触碰长期记忆, 权限和偏好.
+  function resetConversation(): ConversationSnapshot {
+    conversationMessages.length = 0;
+    return listConversation();
+  }
 }
 
 // 创建默认 LangChain Agent 工厂, 每次请求都注入独立的动作收集器.
@@ -167,6 +272,48 @@ function createDefaultAgentFactory(config: AppConfig, registry = createDefaultTo
       systemPrompt: buildAikoSystemPrompt(),
       tools: createAikoTools(proposedActions, registry)
     });
+}
+
+// 判断用户是否明确要求开启新对话或清空当前上下文.
+export function isConversationResetRequest(payload: ChatPayload): boolean {
+  if (payload.attachments.length > 0) return false;
+  const text = payload.text.trim().replace(/[。.!！?？]+$/, "");
+  return /^(?:请|麻烦)?(?:你)?(?:帮我)?(?:清空|删除|重置|忘掉)(?:当前|现在|本轮)?(?:对话|上下文|聊天记录)$/.test(text)
+    || /^(?:请|麻烦)?(?:你)?(?:帮我)?(?:开启|开始|新建|开)(?:一个|一段)?新对话$/.test(text);
+}
+
+// 格式化短期上下文, 让模型知道它不是长期记忆.
+function formatConversationContext(messages: ConversationMessage[], maxChars: number): string {
+  if (messages.length === 0) return "";
+
+  const selected: string[] = [];
+  let usedChars = 0;
+  for (const message of [...messages].reverse()) {
+    const roleLabel = message.role === "user" ? "用户" : "Aiko";
+    const line = `${roleLabel}:${message.content}`;
+    if (usedChars + line.length > maxChars && selected.length > 0) break;
+    selected.push(line);
+    usedChars += line.length;
+    if (usedChars >= maxChars) break;
+  }
+
+  return [
+    "当前对话上下文(短期,可清空;只用于保持本轮连续性;如果与当前输入冲突,以当前输入优先):",
+    ...selected.reverse()
+  ].join("\n");
+}
+
+// 归一化短期上下文消息, 避免单条长文塞爆后续提示词.
+function normalizeConversationContent(content: string): string {
+  const normalized = content.trim().replace(/\s+/g, " ");
+  if (normalized.length <= 2000) return normalized;
+  return `${normalized.slice(0, 2000)}...`;
+}
+
+// 按消息数量裁剪短期上下文, 保留最近的连续消息.
+function trimConversationMessages(messages: ConversationMessage[], maxMessages: number) {
+  if (messages.length <= maxMessages) return;
+  messages.splice(0, messages.length - maxMessages);
 }
 
 // 为当前请求创建 Agent, 避免跨请求共享工具动作状态.
@@ -212,6 +359,7 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
   const openUrl = registry.get("open_url");
   const webSearch = registry.get("web_search");
   const createReminder = registry.get("create_reminder");
+  const writeDesktopMarkdown = registry.get("write_desktop_markdown");
 
   return [
     // 生成打开应用的待确认动作.
@@ -305,6 +453,33 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
           source: z.string().optional().describe("用户原始请求")
         })
       }
+    ),
+    // 生成写入桌面 Markdown 的待确认动作.
+    tool(
+      ({ title, content, source }) => {
+        proposedActions.push({
+          title: "写入 Aiko回答.md",
+          source: source || title,
+          risk: "medium",
+          capability: "write_desktop_markdown",
+          target: DESKTOP_MARKDOWN_TARGET,
+          params: {
+            title: title || "Aiko回答",
+            content
+          }
+        });
+        return "已生成写入桌面 Markdown 的待确认动作.";
+      },
+      {
+        name: "propose_desktop_markdown",
+        description:
+          writeDesktopMarkdown?.description ?? "提出把长篇回复写入桌面 Aiko 文件夹 Markdown 文件的待确认动作.只生成动作,不执行.",
+        schema: z.object({
+          title: z.string().min(1).max(120).describe("Markdown 文件标题,默认使用 Aiko回答"),
+          content: z.string().min(1).max(200000).describe("要写入 Markdown 的完整正文"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
     )
   ];
 }
@@ -343,6 +518,36 @@ function respondWithAction(message: string, action: PendingActionDto): ChatRespo
   return {
     message,
     pendingAction: action
+  };
+}
+
+// 判断这次请求是否更适合落成 Markdown 文件, 避免长文塞进桌宠消息区.
+export function shouldPreferDesktopMarkdownResponse(userText: string, userTranscript = ""): boolean {
+  const text = `${userText}\n${userTranscript}`.trim();
+  if (!text) return false;
+
+  const asksForDocument = /(?:生成|写|制定|整理|输出|起草|设计|做).{0,12}(?:一份|详细|具体|完整|系统|规划|计划|方案|文档|报告|清单|教程|大纲|路线图|总结)/.test(text);
+  const documentNoun = /(?:规划|计划|方案|文档|报告|清单|教程|大纲|路线图|总结)/.test(text);
+  const longSignal = /(?:一份|详细|具体|完整|长文|长一点|系统性|可执行|时间表|步骤)/.test(text);
+  return asksForDocument || (documentNoun && longSignal);
+}
+
+// 根据模型正文生成写入桌面 Markdown 的待确认动作.
+function createDesktopMarkdownAction(source: string, assistantText: string, preferredByRequest: boolean): PendingActionDto | null {
+  const content = assistantText.trim();
+  if (!content) return null;
+  if (!preferredByRequest && content.length < LONG_RESPONSE_MARKDOWN_THRESHOLD) return null;
+
+  return {
+    title: "写入 Aiko回答.md",
+    source: source.trim().slice(0, 1000) || "长篇回复",
+    risk: "medium",
+    capability: "write_desktop_markdown",
+    target: DESKTOP_MARKDOWN_TARGET,
+    params: {
+      title: "Aiko回答",
+      content
+    }
   };
 }
 

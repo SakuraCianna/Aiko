@@ -21,18 +21,22 @@ describe("renderer layout CSS", () => {
     expect(styles).toContain("display: none");
   });
 
-  it("keeps the character surface transparent and draggable", () => {
+  it("keeps the character surface transparent and uses native window dragging", () => {
     const petStage = readFileSync("src/renderer/components/PetStage.tsx", "utf8");
 
     expect(styles).toContain("padding: 0 0 12px");
     expect(styles).toContain("width: 100%");
     expect(styles).toContain("cursor: grab");
     expect(styles).toContain("box-shadow: none");
-    expect(styles).toContain("-webkit-app-region: no-drag");
+    expect(styles).toMatch(/\.character-stage\s*\{[\s\S]*-webkit-app-region:\s*drag;/);
+    expect(styles).toMatch(/\.pet-toolbar\s*\{[\s\S]*-webkit-app-region:\s*no-drag;/);
+    expect(styles).toMatch(/\.hover-controls\s*\{[\s\S]*-webkit-app-region:\s*no-drag;/);
     expect(styles).not.toContain("#dce8ef");
     expect(styles).not.toContain("rgba(250, 252, 255, 0.84)");
-    expect(petStage).toContain("startWindowDrag");
-    expect(petStage).toContain("moveWindowDrag");
+    expect(petStage).not.toContain("startWindowDrag");
+    expect(petStage).not.toContain("moveWindowDrag");
+    expect(petStage).not.toContain("setPointerCapture");
+    expect(petStage).not.toContain("draggingRef");
   });
 
   it("keeps the fixed pet window from creating browser scrollbars", () => {
@@ -41,12 +45,13 @@ describe("renderer layout CSS", () => {
     expect(styles).not.toContain("aspect-ratio: 0.55");
   });
 
-  it("renders replies near the command area instead of recreating a top title bubble", () => {
+  it("replaces the visible reply bubble with voice output", () => {
     const app = readFileSync("src/renderer/App.tsx", "utf8");
 
-    expect(app).toContain("pet-reply");
-    expect(styles).toContain(".pet-reply");
-    expect(styles).toContain("bottom: 78px");
+    expect(app).toContain("createAikoSpeechController");
+    expect(app).toContain("speakAiko");
+    expect(app).not.toContain("className=\"pet-reply\"");
+    expect(app).not.toContain("<MarkdownMessage content={message} />");
     expect(styles).not.toContain("top: 12px");
   });
 
@@ -55,6 +60,16 @@ describe("renderer layout CSS", () => {
 
     expect(app).toContain("isActiveRequest");
     expect(app).toContain("if (!isActiveRequest(requestId)) return");
+  });
+
+  it("preserves pending action choices so generic app requests show selectable apps", () => {
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+    const dialog = readFileSync("src/renderer/components/ConfirmDialog.tsx", "utf8");
+
+    expect(app).toContain("choices: response.pendingAction.choices");
+    expect(app).toContain("onChoose={(action) => void executePendingAction(false, action)}");
+    expect(app).toContain("onChooseDefault={(action) => void executePendingAction(true, action)}");
+    expect(dialog).toContain("将此设定为默认选项");
   });
 
   it("cleans renderer timers when the app unmounts", () => {

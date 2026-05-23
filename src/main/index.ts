@@ -5,7 +5,12 @@ import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
 import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
-import { createMemoryRepository, createPermissionRepository, createReminderRepository } from "./database/repositories";
+import {
+  createApplicationPreferenceRepository,
+  createMemoryRepository,
+  createPermissionRepository,
+  createReminderRepository
+} from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
@@ -26,6 +31,7 @@ void app.whenReady().then(() => {
   const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository });
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
+  const applicationPreferenceRepository = createApplicationPreferenceRepository(database.db);
 
   loadRenderer(petWindow, __dirname);
   loadRenderer(panelWindow, __dirname);
@@ -37,7 +43,8 @@ void app.whenReady().then(() => {
     panelWindow,
     memoryRepository,
     permissionRepository,
-    reminderRepository
+    reminderRepository,
+    applicationPreferenceRepository
   });
 });
 

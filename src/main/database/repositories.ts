@@ -17,6 +17,7 @@ export function createId(prefix: string) {
 export type PermissionRepository = ReturnType<typeof createPermissionRepository>;
 export type ReminderRepository = ReturnType<typeof createReminderRepository>;
 export type MemoryRepository = ReturnType<typeof createMemoryRepository>;
+export type ApplicationPreferenceRepository = ReturnType<typeof createApplicationPreferenceRepository>;
 
 type MemoryRow = {
   id: string;
@@ -302,6 +303,30 @@ export function createPermissionRepository(db: DatabaseSync) {
   };
 }
 
+// 创建应用偏好仓储, 负责保存"默认浏览器"这类用户选择.
+export function createApplicationPreferenceRepository(db: DatabaseSync) {
+  return {
+    // 保存某类泛称应用的默认打开目标.
+    setDefaultApplication(defaultFor: string, target: string) {
+      db.prepare(
+        `
+        INSERT INTO settings (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `
+      ).run(defaultApplicationKey(defaultFor), target.trim());
+    },
+
+    // 读取某类泛称应用的默认打开目标.
+    getDefaultApplication(defaultFor: string) {
+      const row = db
+        .prepare("SELECT value FROM settings WHERE key = ? LIMIT 1")
+        .get(defaultApplicationKey(defaultFor)) as { value: string } | undefined;
+      return row?.value ?? null;
+    }
+  };
+}
+
 // 创建提醒仓储, 负责保存和列出提醒.
 export function createReminderRepository(db: DatabaseSync) {
   return {
@@ -357,4 +382,9 @@ function normalizeTarget(target: string) {
 // 根据能力和目标生成权限主键.
 function permissionId(capability: string, target: string) {
   return `permission:${capability}:${target}`;
+}
+
+// 生成默认应用偏好的设置 key.
+function defaultApplicationKey(defaultFor: string) {
+  return `default_application:${normalizeTarget(defaultFor)}`;
 }

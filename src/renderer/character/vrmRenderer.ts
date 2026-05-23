@@ -46,6 +46,12 @@ const MOTION_DURATION_MS: Record<CharacterMotion, number> = {
   drag: 760
 };
 
+const RELAXED_LEFT_UPPER_ARM_ROTATION = { x: 0.08, y: 0, z: 0.72 };
+const RELAXED_RIGHT_UPPER_ARM_ROTATION = { x: 0.08, y: 0, z: -0.72 };
+const RELAXED_LEFT_LOWER_ARM_ROTATION = { x: 0.04, y: 0, z: 0.08 };
+const RELAXED_RIGHT_LOWER_ARM_ROTATION = { x: 0.04, y: 0, z: -0.08 };
+const LOOK_RESPONSE_RATE = 14;
+
 // 创建基于 Three.js 和 three-vrm 的角色渲染器.
 export function createVrmCharacterRenderer(): CharacterRenderer {
   let mountedElement: HTMLElement | null = null;
@@ -60,6 +66,7 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
   let currentBehavior: CharacterBehavior = "idle";
   let mouthOpen = 0;
   let lookTarget = { x: 0, y: 0 };
+  let currentLookTarget = { x: 0, y: 0 };
   let activeMotion: ActiveMotion | null = null;
   let warnedMissingHead = false;
   const timer = new Timer();
@@ -72,6 +79,8 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
       timer.reset();
       mountedElement = element;
       currentExpression = config.defaultExpression;
+      lookTarget = { x: 0, y: 0 };
+      currentLookTarget = { x: 0, y: 0 };
       console.log(`[aiko:vrm] preparing renderer, container=${element.clientWidth}x${element.clientHeight}`);
       if (element.clientWidth <= 1 || element.clientHeight <= 1) {
         console.warn("[aiko:vrm] character container is very small before resize");
@@ -109,7 +118,6 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
       currentBehavior = behavior;
       currentExpression = BEHAVIOR_EXPRESSION[behavior];
       if (vrm) applyExpression(vrm, currentExpression, mouthOpen);
-      console.log(`[aiko:vrm] set behavior: ${behavior}`);
     },
     // 播放一个带持续时间的角色动作.
     playMotion(motion) {
@@ -122,7 +130,6 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
         startedAt: timer.getElapsed(),
         duration: MOTION_DURATION_MS[motion] / 1000
       };
-      console.log(`[aiko:vrm] play motion: ${motion}`);
     },
     // 设置嘴部张开程度, 供后续 TTS 口型驱动使用.
     setMouthOpen(value) {
@@ -173,7 +180,8 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
         updateIdleMotion(vrm, elapsed);
         updateCharacterBehavior(vrm, elapsed, currentBehavior);
         updateCharacterMotion(vrm, elapsed);
-        updateLookAt(vrm, lookTarget);
+        smoothLookTarget(delta);
+        updateLookAt(vrm, currentLookTarget);
         applyExpression(vrm, currentExpression, resolveMouthOpen(elapsed, currentBehavior, mouthOpen));
         vrm.update(delta);
       }
@@ -196,6 +204,15 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
 
     head.rotation.y = target.x * 0.22;
     head.rotation.x = -target.y * 0.14;
+  }
+
+  // 用指数插值平滑视线目标, 避免鼠标轮询低频时头部一卡一卡地跳.
+  function smoothLookTarget(delta: number) {
+    const factor = 1 - Math.exp(-LOOK_RESPONSE_RATE * delta);
+    currentLookTarget = {
+      x: currentLookTarget.x + (lookTarget.x - currentLookTarget.x) * factor,
+      y: currentLookTarget.y + (lookTarget.y - currentLookTarget.y) * factor
+    };
   }
 
   // 根据当前动作状态调整躯干和手臂姿态.
@@ -303,8 +320,7 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
     case "confirming":
       setOptionalBoneRotation(chest, 0.01, 0, 0);
       setOptionalBoneRotation(spine, 0, 0, 0);
-      setOptionalBoneRotation(leftUpperArm, 0, 0, 0);
-      setOptionalBoneRotation(rightUpperArm, 0, 0, 0);
+      setRelaxedArmPose(leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm);
       break;
     case "success":
       setOptionalBoneRotation(chest, 0.035 + 0.012 * wave, 0, 0.025 * slowWave);
@@ -327,10 +343,7 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
     default:
       setOptionalBoneRotation(chest, 0, 0, Math.sin(elapsed * 1.2) * 0.012);
       setOptionalBoneRotation(spine, 0, 0, 0);
-      setOptionalBoneRotation(leftUpperArm, 0, 0, 0);
-      setOptionalBoneRotation(rightUpperArm, 0, 0, 0);
-      setOptionalBoneRotation(leftLowerArm, 0, 0, 0);
-      setOptionalBoneRotation(rightLowerArm, 0, 0, 0);
+      setRelaxedArmPose(leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm);
   }
 }
 
@@ -437,6 +450,39 @@ function setOptionalBoneRotation(
   bone.rotation.x = x;
   bone.rotation.y = y;
   bone.rotation.z = z;
+}
+
+// 把 VRM 默认 T-pose 手臂压成更像桌宠待机的放松姿态.
+function setRelaxedArmPose(
+  leftUpperArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
+  rightUpperArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
+  leftLowerArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
+  rightLowerArm: { rotation: { x: number; y: number; z: number } } | null | undefined
+) {
+  setOptionalBoneRotation(
+    leftUpperArm,
+    RELAXED_LEFT_UPPER_ARM_ROTATION.x,
+    RELAXED_LEFT_UPPER_ARM_ROTATION.y,
+    RELAXED_LEFT_UPPER_ARM_ROTATION.z
+  );
+  setOptionalBoneRotation(
+    rightUpperArm,
+    RELAXED_RIGHT_UPPER_ARM_ROTATION.x,
+    RELAXED_RIGHT_UPPER_ARM_ROTATION.y,
+    RELAXED_RIGHT_UPPER_ARM_ROTATION.z
+  );
+  setOptionalBoneRotation(
+    leftLowerArm,
+    RELAXED_LEFT_LOWER_ARM_ROTATION.x,
+    RELAXED_LEFT_LOWER_ARM_ROTATION.y,
+    RELAXED_LEFT_LOWER_ARM_ROTATION.z
+  );
+  setOptionalBoneRotation(
+    rightLowerArm,
+    RELAXED_RIGHT_LOWER_ARM_ROTATION.x,
+    RELAXED_RIGHT_LOWER_ARM_ROTATION.y,
+    RELAXED_RIGHT_LOWER_ARM_ROTATION.z
+  );
 }
 
 // 根据容器尺寸同步渲染器和相机比例.

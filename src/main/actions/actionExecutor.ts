@@ -3,19 +3,27 @@ import type {
   ExecuteActionResponse,
 } from "../../shared/ipcTypes";
 import type {
+  ApplicationPreferenceRepository,
   PermissionRepository,
   ReminderRepository,
 } from "../database/repositories";
+import {
+  describeActionFailure,
+  describeActionSuccess,
+} from "../ai/aikoVoice";
 import type { PermissionRule } from "../permissions/permissionService";
 import {
   createRelativeReminder,
   type Reminder,
 } from "../reminders/reminderService";
+import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 
 export type ActionExecutorDeps = {
   openUrl: (url: string) => Promise<void>;
   openApplication: (query: string) => Promise<boolean>;
+  writeDesktopMarkdown?: DesktopMarkdownWriter;
   now: () => Date;
+  applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   permissionRepository?: Pick<
     PermissionRepository,
     "remember" | "has" | "list"
@@ -36,29 +44,46 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       const { action, remember } = request;
 
       if (action.risk === "high") {
-        return { ok: false, message: "这个操作风险太高,当前版本不会执行." };
-      }
-
-      if (remember) {
-        const rule = toPermissionRule(action);
-        // 记住权限时只绑定能力和目标, 不扩大到任意未来动作.
-        if (deps.permissionRepository) {
-          deps.permissionRepository.remember(rule);
-        } else {
-          rememberedActions.add(ruleKey(rule));
-        }
+        return { ok: false, message: describeActionFailure(action, "high_risk") };
       }
 
       if (action.capability === "open_url") {
         await deps.openUrl(action.target);
-        return { ok: true, message: "已打开网页." };
+        rememberSuccessfulPermission(action, remember);
+        return { ok: true, message: describeActionSuccess(action) };
       }
 
       if (action.capability === "open_application") {
         const opened = await deps.openApplication(action.target);
+        if (opened) {
+          rememberSuccessfulPermission(action, remember);
+          rememberDefaultApplication(action, remember);
+        }
+        const defaultFor = readStringParam(action.params, "defaultFor");
+        if (opened && remember && defaultFor) {
+          return {
+            ok: true,
+            message: `${action.target} 已经打开, 也设成默认${defaultFor}. 以后要改的话, 对我说"将默认${defaultFor}改成 XXX".`
+          };
+        }
         return opened
-          ? { ok: true, message: `已打开应用:${action.target}.` }
-          : { ok: false, message: `没有找到已配置的应用:${action.target}.` };
+          ? { ok: true, message: describeActionSuccess(action) }
+          : { ok: false, message: describeActionFailure(action, "not_found") };
+      }
+
+      if (action.capability === "set_default_application") {
+        const defaultFor = readStringParam(action.params, "defaultFor") || action.target;
+        const application = readStringParam(action.params, "application");
+        if (!deps.applicationPreferenceRepository || !application) {
+          return { ok: false, message: describeActionFailure(action, "invalid") };
+        }
+
+        deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, application);
+        rememberSuccessfulPermission(action, remember);
+        return {
+          ok: true,
+          message: `默认${defaultFor}已改成 ${application}. 下次你说"打开${defaultFor}", 我就按这个来.`
+        };
       }
 
       if (action.capability === "create_reminder") {
@@ -68,7 +93,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
 
         // 提醒参数来自模型侧 payload, 保存前必须重新校验.
         if (!amount || (unit !== "minutes" && unit !== "hours")) {
-          return { ok: false, message: "这个提醒缺少有效的时间参数." };
+          return { ok: false, message: describeActionFailure(action, "invalid") };
         }
 
         const reminder = createRelativeReminder({
@@ -82,10 +107,25 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
         } else {
           reminders.push(reminder);
         }
-        return { ok: true, message: `已创建提醒:${title}.` };
+        rememberSuccessfulPermission(action, remember);
+        return { ok: true, message: describeActionSuccess(action) };
       }
 
-      return { ok: false, message: "当前版本还不支持这个操作." };
+      if (action.capability === "write_desktop_markdown") {
+        const title = readStringParam(action.params, "title") || "Aiko回答";
+        const content = readStringParam(action.params, "content");
+
+        // 写文件必须有注入的本地 writer 和非空正文, 避免模型构造空文件.
+        if (!deps.writeDesktopMarkdown || !content) {
+          return { ok: false, message: describeActionFailure(action, "invalid") };
+        }
+
+        const result = await deps.writeDesktopMarkdown({ title, content });
+        rememberSuccessfulPermission(action, remember);
+        return { ok: true, message: `我把 Markdown 写好了: ${result.filePath}` };
+      }
+
+      return { ok: false, message: describeActionFailure(action, "unsupported") };
     },
 
     // 列出当前执行器可见的提醒.
@@ -113,6 +153,32 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       return rememberedActions.has(ruleKey(rule));
     },
   };
+
+  // 执行成功后才记住权限, 避免失败动作污染自动授权规则.
+  function rememberSuccessfulPermission(
+    action: ExecuteActionRequest["action"],
+    remember: boolean,
+  ) {
+    if (!remember) return;
+    const rule = toPermissionRule(action);
+    // 记住权限时只绑定能力和目标, 不扩大到任意未来动作.
+    if (deps.permissionRepository) {
+      deps.permissionRepository.remember(rule);
+    } else {
+      rememberedActions.add(ruleKey(rule));
+    }
+  }
+
+  // 用户选择"设为默认"时, 把泛称应用和具体应用绑定起来.
+  function rememberDefaultApplication(
+    action: ExecuteActionRequest["action"],
+    remember: boolean,
+  ) {
+    if (!remember || !deps.applicationPreferenceRepository) return;
+    const defaultFor = readStringParam(action.params, "defaultFor");
+    if (!defaultFor) return;
+    deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, action.target);
+  }
 }
 
 // 把待执行动作转换成权限规则.

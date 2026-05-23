@@ -19,6 +19,7 @@ describe("Aiko persona prompt", () => {
     const prompt = buildAikoSystemPrompt("Aiko 是有一点俏皮但不过度打扰用户的桌宠.");
 
     expect(prompt).toContain("有一点俏皮");
+    expect(prompt).toContain("不要教用户手动操作步骤");
     expect(prompt).toContain("不能直接执行系统操作");
     expect(prompt).toContain("待确认动作");
   });
@@ -249,6 +250,62 @@ describe("createAikoAgentRuntime", () => {
     expect(invokeInput).toContain("用户喜欢晚上学习时先做轻量复习");
   });
 
+  it("injects current conversation history into the next LangChain request", async () => {
+    const invokeInputs: string[] = [];
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke(input) {
+          invokeInputs.push(JSON.stringify(input));
+          return {
+            messages: [{ role: "assistant", content: invokeInputs.length === 1 ? "可以, 我先记在当前对话里." : "我会沿着刚才的安排继续." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("今晚我想先复习英语"));
+    await runtime.respond(textPayload("那第二步呢"));
+
+    expect(invokeInputs[1]).toContain("当前对话上下文");
+    expect(invokeInputs[1]).toContain("用户:今晚我想先复习英语");
+    expect(invokeInputs[1]).toContain("Aiko:可以, 我先记在当前对话里.");
+  });
+
+  it("resets short-term conversation context without deleting long-term memory", async () => {
+    let recallCount = 0;
+    let invokeCount = 0;
+    const runtime = createAikoAgentRuntime({
+      memoryRuntime: {
+        async recall() {
+          recallCount += 1;
+          return [];
+        },
+        async rememberCandidate() {
+          return;
+        }
+      },
+      agent: {
+        async invoke() {
+          invokeCount += 1;
+          return {
+            messages: [{ role: "assistant", content: "这一轮应该不会调用模型." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("今晚我想先复习英语"));
+    expect(runtime.listConversation().messages.length).toBeGreaterThan(0);
+
+    const response = await runtime.respond(textPayload("开启新对话"));
+
+    expect(response.message).toContain("当前对话上下文已清空");
+    expect(response.message).toContain("长期记忆仍然保留");
+    expect(runtime.listConversation().messages).toEqual([]);
+    expect(invokeCount).toBe(1);
+    expect(recallCount).toBe(1);
+  });
+
   it("tells the model not to infer speech content when speech understanding fails", async () => {
     let invokeInput = "";
     const runtime = createAikoAgentRuntime({
@@ -407,7 +464,7 @@ describe("createAikoAgentRuntime", () => {
 
     const response = await runtime.respond(textPayload("随便聊聊"));
 
-    expect(response.message).toContain("我现在连不上大模型");
+    expect(response.message).toContain("大模型那边现在没接上");
   });
 
   it("streams assistant deltas when the injected LangChain agent supports streaming", async () => {
@@ -428,6 +485,38 @@ describe("createAikoAgentRuntime", () => {
 
     expect(response).toEqual({ message: "好的,我来安排." });
     expect(deltas).toEqual(["好的", ",我来安排."]);
+  });
+
+  it("turns long-form planning requests into a desktop markdown action without streaming the full draft", async () => {
+    const deltas: string[] = [];
+    const markdown = "# 学习规划\n\n## 目标\n\n把今天的任务拆成三段, 每段都有明确产出.";
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return {
+            messages: [{ role: "assistant", content: markdown }]
+          };
+        },
+        async *stream() {
+          throw new Error("long-form markdown requests should be buffered before confirmation");
+        }
+      }
+    });
+
+    const response = await runtime.respondStream(textPayload("帮我生成一份具体学习规划"), (delta) => deltas.push(delta));
+
+    expect(deltas).toEqual([]);
+    expect(response.message).toContain("Markdown");
+    expect(response.pendingAction).toMatchObject({
+      title: "写入 Aiko回答.md",
+      risk: "medium",
+      capability: "write_desktop_markdown",
+      target: "Desktop/Aiko",
+      params: {
+        title: "Aiko回答",
+        content: markdown
+      }
+    });
   });
 
   it("proposes deterministic web search actions", async () => {

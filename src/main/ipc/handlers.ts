@@ -1,13 +1,19 @@
 import { BrowserWindow, ipcMain, screen, type WebContents } from "electron";
+import { resolveOpenApplicationAction } from "../actions/applicationActionPolicy";
 import { createActionExecutor } from "../actions/actionExecutor";
-import type { AikoAgentRuntime } from "../agent/aikoAgentRuntime";
+import { isConversationResetRequest, type AikoAgentRuntime } from "../agent/aikoAgentRuntime";
 import { discoverApplications } from "../capabilities/applicationCatalog";
-import { openApplication } from "../capabilities/openApplication";
+import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
-import { PET_WINDOW_SIZE } from "../windows/petWindowConfig";
-import type { MemoryRepository, PermissionRepository, ReminderRepository } from "../database/repositories";
+import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import type {
+  ApplicationPreferenceRepository,
+  MemoryRepository,
+  PermissionRepository,
+  ReminderRepository
+} from "../database/repositories";
 import { validateChatPayload, type ChatPayload } from "../../shared/chatPayload";
-import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto, WindowDragPoint } from "../../shared/ipcTypes";
+import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto } from "../../shared/ipcTypes";
 
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
@@ -16,6 +22,8 @@ export type AikoHandlerDeps = {
   memoryRepository?: Pick<MemoryRepository, "listMemories" | "listPendingCandidates" | "acceptCandidate" | "rejectCandidate">;
   permissionRepository?: Pick<PermissionRepository, "remember" | "has" | "list">;
   reminderRepository?: Pick<ReminderRepository, "save" | "list">;
+  applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
+  applicationProvider?: () => ApplicationConfig[];
 };
 
 type PendingActionEntry = {
@@ -23,23 +31,19 @@ type PendingActionEntry = {
   createdAt: number;
 };
 
-type WindowDragState = {
-  pointerStartX: number;
-  pointerStartY: number;
-  windowStartX: number;
-  windowStartY: number;
-};
-
 const PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
 
 // 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const pendingActions = new Map<string, PendingActionEntry>();
-  let windowDragState: WindowDragState | null = null;
+  const getApplications = deps.applicationProvider ?? (() => discoverApplications());
+  const writeDesktopMarkdown = createDesktopMarkdownWriter();
   const actionExecutor = createActionExecutor({
     openUrl,
-    openApplication: (query) => openApplication(discoverApplications(), query),
+    openApplication: (query) => openApplication(getApplications(), query),
+    writeDesktopMarkdown,
     now: () => new Date(),
+    applicationPreferenceRepository: deps.applicationPreferenceRepository,
     permissionRepository: deps.permissionRepository,
     reminderRepository: deps.reminderRepository
   });
@@ -64,36 +68,6 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     };
   });
 
-  ipcMain.handle("window:drag-start", (_event, point: unknown) => {
-    if (!isWindowDragPoint(point)) return;
-    const bounds = deps.petWindow.getBounds();
-    windowDragState = {
-      pointerStartX: point.screenX,
-      pointerStartY: point.screenY,
-      windowStartX: bounds.x,
-      windowStartY: bounds.y
-    };
-  });
-
-  ipcMain.handle("window:drag-move", (_event, point: unknown) => {
-    if (!windowDragState || !isWindowDragPoint(point)) return;
-    const nextX = Math.round(windowDragState.windowStartX + point.screenX - windowDragState.pointerStartX);
-    const nextY = Math.round(windowDragState.windowStartY + point.screenY - windowDragState.pointerStartY);
-    deps.petWindow.setBounds(
-      {
-        x: nextX,
-        y: nextY,
-        width: PET_WINDOW_SIZE.width,
-        height: PET_WINDOW_SIZE.height
-      },
-      false
-    );
-  });
-
-  ipcMain.handle("window:drag-end", () => {
-    windowDragState = null;
-  });
-
   ipcMain.handle("window:open-panel", (_event, panel: unknown) => {
     if (!isPanelName(panel)) return;
     deps.panelWindow.show();
@@ -105,6 +79,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!payload) {
       return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
+    if (isConversationResetRequest(payload)) pendingActions.clear();
 
     try {
       const response = await deps.agentRuntime.respond(payload);
@@ -123,6 +98,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!payload) {
       return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
+    if (isConversationResetRequest(payload)) pendingActions.clear();
 
     try {
       const response = await deps.agentRuntime.respondStream(payload, (text) => {
@@ -152,6 +128,15 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     }
 
     return actionExecutor.execute({ action: pendingEntry.action, remember: request.remember });
+  });
+
+  ipcMain.handle("conversation:list", () => {
+    return deps.agentRuntime.listConversation();
+  });
+
+  ipcMain.handle("conversation:reset", () => {
+    pendingActions.clear();
+    return deps.agentRuntime.resetConversation();
   });
 
   ipcMain.handle("memory:list", () => {
@@ -184,16 +169,74 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   ): Promise<ChatResponse> {
     if (!action) return { message };
 
+    if (!isSupportedAction(action)) return { message };
+
+    if (action.capability === "open_application") {
+      const decision = resolveOpenApplicationAction(action, getApplications(), {
+        defaultApplicationTarget: deps.applicationPreferenceRepository?.getDefaultApplication(action.target)
+      });
+      if (decision.kind === "choice_required") {
+        return createApplicationChoiceResponse(decision.message, action, decision.actions);
+      }
+
+      const result = await actionExecutor.execute({ action: decision.action, remember: false });
+      return { message: result.message };
+    }
+
     if (actionExecutor.isRememberedAction(action)) {
       const result = await actionExecutor.execute({ action, remember: false });
       return { message: result.message };
     }
 
+    const pendingAction = storePendingAction(action);
+    return { message, pendingAction };
+  }
+
+  // 为候选应用生成独立待执行动作, 用户选择某一项时只执行对应动作.
+  function createApplicationChoiceResponse(
+    message: string,
+    sourceAction: PendingActionDto,
+    actions: PendingActionDto[]
+  ): ChatResponse {
+    const choices = actions.map((candidate) => {
+      const pendingChoice = storePendingAction(candidate);
+      return {
+        id: pendingChoice.id,
+        title: pendingChoice.target,
+        subtitle: "打开这个应用",
+        action: {
+          id: pendingChoice.id,
+          title: pendingChoice.title,
+          source: pendingChoice.source,
+          risk: pendingChoice.risk,
+          capability: pendingChoice.capability,
+          target: pendingChoice.target,
+          params: pendingChoice.params
+        }
+      };
+    });
+
+    return {
+      message,
+      pendingAction: {
+        id: crypto.randomUUID(),
+        title: "选择要打开的应用",
+        source: sourceAction.source,
+        risk: "low",
+        capability: "choose_application",
+        target: sourceAction.target,
+        choices
+      }
+    };
+  }
+
+  // 保存一个待确认动作并分配一次性确认令牌.
+  function storePendingAction(action: PendingActionDto): PendingActionDto & { id: string } {
     const actionId = crypto.randomUUID();
     const pendingAction = { ...action, id: actionId };
     removeExpiredPendingActions(pendingActions, Date.now());
     pendingActions.set(actionId, { action: pendingAction, createdAt: Date.now() });
-    return { message, pendingAction };
+    return pendingAction;
   }
 }
 
@@ -217,13 +260,6 @@ function parseChatPayload(input: unknown): ChatPayload | null {
 }
 
 // 发送流式增量前检查 WebContents 生命周期, 避免窗口关闭后继续投递 IPC.
-// 校验窗口拖拽坐标, 防止 renderer 传入无效值.
-function isWindowDragPoint(value: unknown): value is WindowDragPoint {
-  if (!value || typeof value !== "object") return false;
-  const point = value as WindowDragPoint;
-  return Number.isFinite(point.screenX) && Number.isFinite(point.screenY);
-}
-
 function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
   if (sender.isDestroyed()) return;
   try {
@@ -288,6 +324,33 @@ function isSupportedAction(action: PendingActionDto): boolean {
       typeof params.title === "string" &&
       params.title.trim().length > 0 &&
       params.title.length <= 180
+    );
+  }
+
+  if (action.capability === "set_default_application") {
+    const params = action.params;
+    return (
+      !!params &&
+      typeof params.defaultFor === "string" &&
+      params.defaultFor.trim().length > 0 &&
+      params.defaultFor.length <= 180 &&
+      typeof params.application === "string" &&
+      params.application.trim().length > 0 &&
+      params.application.length <= 180
+    );
+  }
+
+  if (action.capability === "write_desktop_markdown") {
+    const params = action.params;
+    return (
+      action.target === "Desktop/Aiko" &&
+      !!params &&
+      typeof params.title === "string" &&
+      params.title.trim().length > 0 &&
+      params.title.length <= 120 &&
+      typeof params.content === "string" &&
+      params.content.trim().length > 0 &&
+      params.content.length <= 200000
     );
   }
 

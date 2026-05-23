@@ -14,6 +14,7 @@ describe("petWindowConfig", () => {
       maxWidth: 320,
       minHeight: 560,
       maxHeight: 560,
+      show: false,
       title: "",
       frame: false,
       transparent: true,

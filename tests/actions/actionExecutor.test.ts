@@ -20,7 +20,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: true,
-      message: "已打开网页."
+      message: "网页已打开. 这一步我接上了."
     });
     expect(opened).toEqual(["https://example.com"]);
   });
@@ -41,7 +41,7 @@ describe("createActionExecutor", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.message).toBe("已创建提醒:喝水.");
+    expect(result.message).toBe("提醒已记好: 喝水. 到点我会把它拎出来.");
     expect(executor.listReminders()).toMatchObject([
       {
         title: "喝水",
@@ -68,7 +68,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: true,
-      message: "已创建提醒:喝水."
+      message: "提醒已记好: 喝水. 到点我会把它拎出来."
     });
     expect(executor.listReminders()).toMatchObject([
       {
@@ -77,6 +77,42 @@ describe("createActionExecutor", () => {
         status: "active"
       }
     ]);
+  });
+
+  it("writes desktop markdown actions through the injected capability", async () => {
+    const written: Array<{ title: string; content: string }> = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      writeDesktopMarkdown: async (request) => {
+        written.push(request);
+        return {
+          filePath: "C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\20260523-163005-Aiko回答.md"
+        };
+      },
+      now: () => new Date("2026-05-23T08:30:05.000Z")
+    });
+
+    const result = await executor.execute({
+      action: {
+        title: "写入 Aiko回答.md",
+        source: "帮我生成一份具体学习规划",
+        risk: "medium",
+        capability: "write_desktop_markdown",
+        target: "Desktop/Aiko",
+        params: {
+          title: "Aiko回答",
+          content: "# 学习规划"
+        }
+      },
+      remember: false
+    });
+
+    expect(written).toEqual([{ title: "Aiko回答", content: "# 学习规划" }]);
+    expect(result).toEqual({
+      ok: true,
+      message: "我把 Markdown 写好了: C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\20260523-163005-Aiko回答.md"
+    });
   });
 
   it("rejects high-risk actions", async () => {
@@ -96,7 +132,7 @@ describe("createActionExecutor", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "这个操作风险太高,当前版本不会执行."
+      message: "这个动作风险偏高, 我先不碰. 稳一点比较好."
     });
   });
 
@@ -142,6 +178,58 @@ describe("createActionExecutor", () => {
     expect(executor.isRememberedAction(lowRiskAction("open_application", "CHROME"))).toBe(true);
     expect(executor.listRememberedActions()).toEqual(["open_application:chrome"]);
     expect(executor.listReminders()).toMatchObject([{ title: "喝水" }]);
+  });
+
+  it("does not remember permissions when execution fails", async () => {
+    const remembered: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      now: () => new Date("2026-05-19T10:00:00.000Z"),
+      permissionRepository: {
+        remember: (rule) => remembered.push(`${rule.capability}:${rule.target.toLowerCase()}`),
+        has: () => false,
+        list: () => []
+      }
+    });
+
+    const result = await executor.execute({
+      action: lowRiskAction("open_application", "Missing App"),
+      remember: true
+    });
+
+    expect(result.ok).toBe(false);
+    expect(remembered).toEqual([]);
+  });
+
+  it("sets a default app preference when a chosen app is remembered as default", async () => {
+    const opened: string[] = [];
+    const defaults: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async (query) => {
+        opened.push(query);
+        return true;
+      },
+      now: () => new Date("2026-05-19T10:00:00.000Z"),
+      applicationPreferenceRepository: {
+        setDefaultApplication: (defaultFor, target) => defaults.push(`${defaultFor}:${target}`),
+        getDefaultApplication: () => null
+      }
+    });
+
+    const result = await executor.execute({
+      action: {
+        ...lowRiskAction("open_application", "Google Chrome"),
+        params: { defaultFor: "浏览器" }
+      },
+      remember: true
+    });
+
+    expect(opened).toEqual(["Google Chrome"]);
+    expect(defaults).toEqual(["浏览器:Google Chrome"]);
+    expect(result.message).toContain("默认浏览器");
+    expect(result.message).toContain("将默认浏览器改成");
   });
 });
 

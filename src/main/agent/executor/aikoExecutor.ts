@@ -1,4 +1,5 @@
 import type { AikoPlan, ExecutionProposal } from "../types";
+import { describeActionFailure } from "../../ai/aikoVoice";
 
 export type AikoExecutor = {
   prepare: (plan: AikoPlan) => Promise<ExecutionProposal>;
@@ -20,7 +21,7 @@ export function createAikoExecutor(): AikoExecutor {
       if (actionStep.action.risk === "high") {
         return {
           kind: "blocked",
-          message: "这个操作风险太高,当前版本不会执行."
+          message: describeActionFailure(actionStep.action, "high_risk")
         };
       }
 

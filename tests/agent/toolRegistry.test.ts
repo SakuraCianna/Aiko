@@ -10,6 +10,7 @@ describe("createDefaultToolRegistry", () => {
       "open_url",
       "web_search",
       "create_reminder",
+      "write_desktop_markdown",
       "recall_memory",
       "list_reminders"
     ]);
@@ -56,6 +57,22 @@ describe("createDefaultToolRegistry", () => {
       capability: "list_reminders",
       risk: "low",
       requiresConfirmation: false,
+      planOnly: true
+    });
+  });
+
+  it("exposes desktop markdown writing as a confirmed medium-risk local action", () => {
+    const registry = createDefaultToolRegistry();
+
+    expect(registry.get("write_desktop_markdown")).toMatchObject({
+      capability: "write_desktop_markdown",
+      risk: "medium",
+      requiresConfirmation: true,
+      schema: {
+        title: "string",
+        content: "string",
+        source: "string?"
+      },
       planOnly: true
     });
   });

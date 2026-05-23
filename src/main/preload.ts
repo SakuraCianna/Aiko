@@ -8,12 +8,6 @@ const api: AikoApi = {
   setClickThrough: (enabled) => ipcRenderer.invoke("window:set-click-through", enabled),
   // 读取系统鼠标坐标和桌宠窗口位置, 用于窗口外视线跟踪.
   getCursorState: () => ipcRenderer.invoke("window:get-cursor-state"),
-  // 开始拖拽桌宠窗口.
-  startWindowDrag: (point) => ipcRenderer.invoke("window:drag-start", point),
-  // 根据鼠标屏幕坐标移动桌宠窗口.
-  moveWindowDrag: (point) => ipcRenderer.invoke("window:drag-move", point),
-  // 结束当前桌宠窗口拖拽.
-  endWindowDrag: () => ipcRenderer.invoke("window:drag-end"),
   // 打开指定的管理面板.
   openPanel: (panel) => ipcRenderer.invoke("window:open-panel", panel),
   // 发送一次普通聊天请求.
@@ -29,6 +23,10 @@ const api: AikoApi = {
   },
   // 确认并执行一个待确认动作.
   executeAction: (request) => ipcRenderer.invoke("action:execute", request),
+  // 读取当前短期对话上下文.
+  listConversation: () => ipcRenderer.invoke("conversation:list"),
+  // 清空当前短期对话上下文.
+  resetConversation: () => ipcRenderer.invoke("conversation:reset"),
   // 读取长期记忆和待确认记忆候选.
   listMemory: () => ipcRenderer.invoke("memory:list"),
   // 接受一条待确认记忆候选.

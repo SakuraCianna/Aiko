@@ -20,6 +20,9 @@ describe("isAllowedDevServerUrl", () => {
 
     expect(mainEntry).toContain("setPath(\"sessionData\"");
     expect(mainEntry).toContain("attachRendererDiagnostics");
+    expect(petWindow).toContain("restorePetWindowChrome");
+    expect(petWindow).toContain("page-title-updated");
+    expect(petWindow).toContain("showInactive");
     expect(petWindow).toContain("setMinimizable(false)");
     expect(petWindow).toContain("setMenuBarVisibility(false)");
     expect(petWindow).toContain("enforcePetWindowSize");

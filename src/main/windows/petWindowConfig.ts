@@ -24,6 +24,7 @@ export function createPetWindowOptions(
     maxHeight: PET_WINDOW_SIZE.height,
     x: Math.max(0, workAreaSize.width - PET_WINDOW_SIZE.width - 70),
     y: Math.max(0, workAreaSize.height - PET_WINDOW_SIZE.height - 80),
+    show: false,
     title: "",
     transparent: true,
     backgroundColor: "#00000000",

@@ -55,4 +55,28 @@ describe("character renderer migration", () => {
     expect(vrmRenderer).toContain("if (destroyed)");
     expect(vrmRenderer).toContain("VRMUtils.deepDispose(loadedVrm.scene)");
   });
+
+  it("applies a relaxed arm pose instead of leaving VRM in bind T-pose", () => {
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+
+    expect(vrmRenderer).toContain("RELAXED_LEFT_UPPER_ARM_ROTATION");
+    expect(vrmRenderer).toContain("setRelaxedArmPose");
+    expect(vrmRenderer).toContain("setRelaxedArmPose(leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm)");
+  });
+
+  it("does not print routine behavior or motion changes during interaction", () => {
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+
+    expect(vrmRenderer).not.toContain("[aiko:vrm] set behavior");
+    expect(vrmRenderer).not.toContain("[aiko:vrm] play motion");
+  });
+
+  it("smooths look-at movement inside the render loop instead of snapping per cursor poll", () => {
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+
+    expect(vrmRenderer).toContain("LOOK_RESPONSE_RATE");
+    expect(vrmRenderer).toContain("currentLookTarget");
+    expect(vrmRenderer).toContain("smoothLookTarget");
+    expect(vrmRenderer).toContain("Math.exp(-LOOK_RESPONSE_RATE * delta)");
+  });
 });

@@ -4,28 +4,30 @@ import type { PendingActionDto, PanelName } from "../shared/ipcTypes";
 import type { CharacterBehavior, CharacterMotion } from "./character/characterTypes";
 import { ChatPanel } from "./components/ChatPanel";
 import { CommandInput } from "./components/CommandInput";
-import { ConfirmDialog, type PendingAction } from "./components/ConfirmDialog";
-import { MarkdownMessage } from "./components/MarkdownMessage";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { PanelShell } from "./components/PanelShell";
 import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
 
 // 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
 export function App() {
   const [message, setMessage] = useState("");
-  const [pendingAction, setPendingAction] = useState<(PendingAction & PendingActionDto) | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingActionDto | null>(null);
   const [activePanel, setActivePanel] = useState<PanelName | null>(null);
   const [clickThrough, setClickThrough] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const [characterBehavior, setCharacterBehavior] = useState<CharacterBehavior>("idle");
   const [motionRequest, setMotionRequest] = useState<{ motion: CharacterMotion; id: number } | null>(null);
+  const speechControllerRef = useRef<AikoSpeechController | null>(null);
   const hideControlsTimerRef = useRef<number | null>(null);
   const characterIdleTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    speechControllerRef.current = createAikoSpeechController();
     const unsubscribeStreamDeltas = window.aiko.onChatStreamDelta((delta) => {
       if (!isActiveRequest(delta.requestId)) return;
       setCharacterBehaviorNow("speaking");
@@ -35,6 +37,8 @@ export function App() {
 
     return () => {
       unsubscribeStreamDeltas();
+      speechControllerRef.current?.cancel();
+      speechControllerRef.current = null;
       clearHideControlsTimer();
       clearCharacterIdleTimer();
       activeStreamIdRef.current = null;
@@ -63,8 +67,8 @@ export function App() {
       setMessage(response.message);
       showControls();
       if (response.pendingAction) {
-        setCharacterBehaviorNow("confirming");
         requestCharacterMotion("notice");
+        speakAiko(response.message, "confirming");
         setPendingAction({
           id: response.pendingAction.id,
           title: response.pendingAction.title,
@@ -72,35 +76,35 @@ export function App() {
           risk: response.pendingAction.risk,
           capability: response.pendingAction.capability,
           target: response.pendingAction.target,
-          params: response.pendingAction.params
+          params: response.pendingAction.params,
+          choices: response.pendingAction.choices
         });
       } else {
-        setCharacterBehaviorNow("speaking");
         requestCharacterMotion("nod");
-        returnCharacterToIdleSoon(1800);
+        speakAiko(response.message, "idle");
       }
     } catch {
       if (!isActiveRequest(requestId)) return;
       activeStreamIdRef.current = null;
-      setMessage("我这边暂时没有收到回复, 但本地功能还在.");
+      const fallbackMessage = "我这边暂时没有收到回复, 但本地功能还在.";
+      setMessage(fallbackMessage);
       setCharacterBehaviorNow("failure");
       requestCharacterMotion("failure");
-      returnCharacterToIdleSoon(1600);
+      speakAiko(fallbackMessage, "idle");
       showControls();
     }
   }
 
   // 执行当前待确认动作, 可选择是否记住授权.
-  async function executePendingAction(remember: boolean) {
-    if (!pendingAction) return;
+  async function executePendingAction(remember: boolean, selectedAction: PendingActionDto | null = pendingAction) {
+    if (!selectedAction) return;
     const result = await window.aiko.executeAction({
-      action: pendingAction,
+      action: selectedAction,
       remember
     });
     setMessage(result.message);
-    setCharacterBehaviorNow(result.ok ? "success" : "failure");
     requestCharacterMotion(result.ok ? "success" : "failure");
-    returnCharacterToIdleSoon(1500);
+    speakAiko(result.message, "idle", result.ok ? "success" : "failure");
     showControls();
     setPendingAction(null);
   }
@@ -110,8 +114,9 @@ export function App() {
     const next = !clickThrough;
     setClickThrough(next);
     await window.aiko.setClickThrough(next);
-    setMessage(next ? "点击穿透已开启. 用托盘或快捷键可以再叫我." : "点击穿透已关闭.");
-    setCharacterBehaviorNow(next ? "asleep" : "idle");
+    const statusMessage = next ? "点击穿透已开启. 用托盘或快捷键可以再叫我." : "点击穿透已关闭.";
+    setMessage(statusMessage);
+    speakAiko(statusMessage, next ? "asleep" : "idle", next ? "asleep" : "speaking");
   }
 
   // 清理隐藏控件计时器, 防止卸载后继续写入状态.
@@ -148,6 +153,29 @@ export function App() {
     }, delayMs);
   }
 
+  // 用语音播放 Aiko 回复, 并把角色状态和语音生命周期同步.
+  function speakAiko(text: string, afterSpeech: CharacterBehavior = "idle", speakingBehavior: CharacterBehavior = "speaking") {
+    const controller = speechControllerRef.current;
+    setCharacterBehaviorNow(speakingBehavior);
+    const started = controller?.speak(text, {
+      onStart: () => setCharacterBehaviorNow(speakingBehavior),
+      onEnd: () => {
+        setCharacterBehavior(afterSpeech);
+      },
+      onError: () => {
+        setCharacterBehavior(afterSpeech);
+      }
+    });
+
+    if (!started) {
+      clearCharacterIdleTimer();
+      characterIdleTimerRef.current = window.setTimeout(() => {
+        setCharacterBehavior(afterSpeech);
+        characterIdleTimerRef.current = null;
+      }, 1200);
+    }
+  }
+
   // 显示输入控件并取消隐藏计时器.
   function showControls() {
     clearHideControlsTimer();
@@ -174,11 +202,6 @@ export function App() {
           onControlsEnter={showControls}
           onControlsLeave={hideControlsSoon}
         />
-        {message && (
-          <div className="pet-reply" role="status">
-            <MarkdownMessage content={message} />
-          </div>
-        )}
         <div
           className={`hover-controls${controlsVisible ? " controls-visible" : ""}`}
           onMouseEnter={showControls}
@@ -192,11 +215,13 @@ export function App() {
         action={pendingAction}
         onOnce={() => void executePendingAction(false)}
         onAlways={() => void executePendingAction(true)}
+        onChoose={(action) => void executePendingAction(false, action)}
+        onChooseDefault={(action) => void executePendingAction(true, action)}
         onCancel={() => {
-          setMessage("已取消.");
-          setCharacterBehaviorNow("failure");
+          const cancelMessage = "已取消. 我先把手收回来.";
+          setMessage(cancelMessage);
           requestCharacterMotion("shake");
-          returnCharacterToIdleSoon(1200);
+          speakAiko(cancelMessage, "idle", "failure");
           showControls();
           setPendingAction(null);
         }}

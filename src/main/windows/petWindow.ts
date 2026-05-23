@@ -7,6 +7,43 @@ export function createPetWindow(preloadPath: string): BrowserWindow {
   const primaryDisplay = screen.getPrimaryDisplay();
   const win = new BrowserWindow(createPetWindowOptions(preloadPath, primaryDisplay.workAreaSize));
 
+  restorePetWindowChrome(win);
+
+  win.on("show", () => console.log("[aiko:window] pet window shown"));
+  win.on("hide", () => console.warn("[aiko:window] pet window hidden"));
+  win.on("blur", () => {
+    console.log("[aiko:window] pet window blurred");
+    restorePetWindowChrome(win);
+  });
+  win.on("focus", () => {
+    console.log("[aiko:window] pet window focused");
+    restorePetWindowChrome(win);
+  });
+  win.on("resize", () => enforcePetWindowSize(win));
+  win.on("maximize", () => {
+    console.warn("[aiko:window] unexpected maximize was reverted");
+    win.unmaximize();
+    enforcePetWindowSize(win);
+  });
+  win.once("ready-to-show", () => {
+    restorePetWindowChrome(win);
+    win.showInactive();
+  });
+  win.webContents.once("did-finish-load", () => {
+    restorePetWindowChrome(win);
+    if (!win.isVisible()) win.showInactive();
+  });
+  win.webContents.on("page-title-updated", (event) => {
+    event.preventDefault();
+    restorePetWindowChrome(win);
+  });
+
+  return win;
+}
+
+// 反复恢复桌宠窗口的无标题栏配置, 规避 Windows 透明窗口偶发标题栏回闪.
+export function restorePetWindowChrome(win: BrowserWindow) {
+  win.setTitle("");
   win.setMenuBarVisibility(false);
   win.removeMenu();
   win.setBackgroundColor("#00000000");
@@ -17,19 +54,6 @@ export function createPetWindow(preloadPath: string): BrowserWindow {
   win.setMinimizable(false);
   win.setMaximizable(false);
   win.setSkipTaskbar(true);
-
-  win.on("show", () => console.log("[aiko:window] pet window shown"));
-  win.on("hide", () => console.warn("[aiko:window] pet window hidden"));
-  win.on("blur", () => console.log("[aiko:window] pet window blurred"));
-  win.on("focus", () => console.log("[aiko:window] pet window focused"));
-  win.on("resize", () => enforcePetWindowSize(win));
-  win.on("maximize", () => {
-    console.warn("[aiko:window] unexpected maximize was reverted");
-    win.unmaximize();
-    enforcePetWindowSize(win);
-  });
-
-  return win;
 }
 
 // 强制桌宠窗口保持固定尺寸, 防止拖拽或系统行为意外改变 bounds.

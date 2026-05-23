@@ -58,7 +58,7 @@ button {
   border: none;
   box-shadow: none;
   cursor: grab;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .character-stage:active {
@@ -104,6 +104,7 @@ button {
 .pet-toolbar button,
 .command-input button,
 .dialog-actions button,
+.choice-actions button,
 .panel-tabs button {
   border: 1px solid rgba(73, 101, 126, 0.22);
   background: rgba(255, 255, 255, 0.86);
@@ -148,8 +149,10 @@ button {
   right: 8px;
   bottom: 78px;
   z-index: 19;
-  max-height: 92px;
-  overflow: hidden;
+  max-height: min(190px, calc(100vh - 172px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 9px 11px;
   border: 1px solid rgba(73, 101, 126, 0.2);
   border-radius: 8px;
@@ -159,6 +162,18 @@ button {
   font-size: 13px;
   line-height: 1.45;
   -webkit-app-region: no-drag;
+}
+
+.pet-reply::-webkit-scrollbar,
+.markdown-message pre::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.pet-reply::-webkit-scrollbar-thumb,
+.markdown-message pre::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(73, 101, 126, 0.28);
 }
 
 .markdown-message {
@@ -325,6 +340,36 @@ button {
   margin-top: 16px;
 }
 
+.choice-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.choice-card {
+  display: grid;
+  gap: 6px;
+}
+
+.choice-actions button {
+  justify-items: start;
+  min-height: 44px;
+  padding: 7px 12px;
+  text-align: left;
+}
+
+.choice-default-button {
+  min-height: 32px;
+  color: #49657e;
+  font-size: 12px;
+  background: rgba(245, 249, 252, 0.92);
+}
+
+.choice-actions small {
+  color: #65778a;
+  font-size: 12px;
+}
+
 .panel-shell {
   width: min(920px, calc(100vw - 32px));
   height: min(640px, calc(100vh - 32px));
@@ -387,6 +432,50 @@ button {
 
 .memory-panel {
   align-content: start;
+}
+
+.conversation-panel {
+  align-content: start;
+}
+
+.conversation-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.conversation-toolbar h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.conversation-toolbar button {
+  border: 1px solid rgba(73, 101, 126, 0.22);
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #26394b;
+}
+
+.conversation-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.96);
+}
+
+.conversation-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.conversation-card span {
+  color: #667789;
+  font-size: 12px;
 }
 
 .memory-card {

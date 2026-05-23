@@ -1,4 +1,5 @@
 import type { PendingActionDto } from "../../../shared/ipcTypes";
+import { describePendingAction } from "../../ai/aikoVoice";
 import type { AikoPlan, PlannerInput } from "../types";
 
 export type AikoPlanner = {
@@ -60,59 +61,80 @@ function detectFirstDeterministicAction(userText: string, userTranscript: string
 export function detectDeterministicAction(input: string): DetectedAction | null {
   const text = input.trim();
 
-  const openUrlMatch = text.match(/^打开\s+(https?:\/\/\S+)$/i);
+  const defaultApplicationMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:将|把)?默认(.+?)改成\s*(.+)$/);
+  if (defaultApplicationMatch?.[1] && defaultApplicationMatch?.[2]) {
+    const defaultFor = normalizeDefaultApplicationKind(defaultApplicationMatch[1]);
+    const application = normalizeApplicationQuery(defaultApplicationMatch[2]);
+    return toDetectedAction({
+        title: `设置默认应用:${defaultFor}`,
+        source: text,
+        risk: "low",
+        capability: "set_default_application",
+        target: defaultFor,
+        params: {
+          defaultFor,
+          application
+        }
+    });
+  }
+
+  const openUrlMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:打开|访问|开一下)\s*(https?:\/\/\S+)$/i);
   if (openUrlMatch?.[1]) {
     const url = openUrlMatch[1].trim();
-    return {
-      message: "我可以帮你打开这个网页.",
-      action: {
+    return toDetectedAction({
         title: `打开网页:${url}`,
         source: text,
         risk: "low",
         capability: "open_url",
         target: url
-      }
-    };
+    });
   }
 
-  const searchMatch = text.match(/^(?:搜索|搜一下|查一下)\s+(.+)$/);
+  const bareUrlMatch = text.match(/^(https?:\/\/\S+)$/i);
+  if (bareUrlMatch?.[1]) {
+    const url = bareUrlMatch[1].trim();
+    return toDetectedAction({
+        title: `打开网页:${url}`,
+        source: text,
+        risk: "low",
+        capability: "open_url",
+        target: url
+    });
+  }
+
+  const searchMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:搜索|搜一下|查一下|查找|找一下)\s*(.+)$/);
   if (searchMatch?.[1]) {
     const query = searchMatch[1].trim();
-    return {
-      message: `我可以帮你搜索:${query}`,
-      action: {
+    return toDetectedAction({
         title: `搜索网页:${query}`,
         source: text,
         risk: "low",
         capability: "open_url",
         target: buildSearchUrl(query)
-      }
-    };
+    });
   }
 
-  const openMatch = text.match(/^打开\s+(.+)$/);
+  const openMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:打开|启动|运行|开启|开一下)\s*(?:一下)?\s*(.+)$/);
   if (openMatch?.[1]) {
-    const query = openMatch[1].trim();
-    return {
-      message: `我可以帮你打开 ${query}.`,
-      action: {
+    const query = normalizeApplicationQuery(openMatch[1]);
+    return toDetectedAction({
         title: `打开应用:${query}`,
         source: text,
         risk: "low",
         capability: "open_application",
         target: query
-      }
-    };
+    });
   }
 
-  const reminderMatch = text.match(/^(\d+)\s*(分钟|小时)后提醒我(.+)$/);
-  if (reminderMatch?.[1] && reminderMatch?.[2] && reminderMatch?.[3]) {
-    const amount = Number(reminderMatch[1]);
-    const unit = reminderMatch[2] === "小时" ? "hours" : "minutes";
-    const title = reminderMatch[3].trim();
-    return {
-      message: `我可以在 ${amount} ${reminderMatch[2]}后提醒你:${title}`,
-      action: {
+  const reminderMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:(\d+)\s*(分钟|小时)后提醒我|提醒我\s*(\d+)\s*(分钟|小时)后)\s*(.+)$/);
+  const reminderAmountText = reminderMatch?.[1] ?? reminderMatch?.[3];
+  const reminderUnitLabel = reminderMatch?.[2] ?? reminderMatch?.[4];
+  if (reminderAmountText && reminderUnitLabel && reminderMatch?.[5]) {
+    const amount = Number(reminderAmountText);
+    const unitLabel = reminderUnitLabel;
+    const unit = unitLabel === "小时" ? "hours" : "minutes";
+    const title = (reminderMatch[5] ?? "").trim();
+    return toDetectedAction({
         title: `创建提醒:${title}`,
         source: text,
         risk: "low",
@@ -123,11 +145,48 @@ export function detectDeterministicAction(input: string): DetectedAction | null 
           unit,
           title
         }
-      }
-    };
+    });
   }
 
   return null;
+}
+
+// 把动作包装成带 Aiko 语气的检测结果.
+function toDetectedAction(action: PendingActionDto): DetectedAction {
+  return {
+    message: describePendingAction(action),
+    action
+  };
+}
+
+// 把常见中文应用叫法归一成更容易匹配到本地应用的名称.
+function normalizeApplicationQuery(rawQuery: string): string {
+  const query = rawQuery.trim().replace(/[。.!！?？]+$/, "");
+  const normalized = query.toLowerCase().replace(/\s+/g, "");
+  const aliases: Record<string, string> = {
+    google: "Google Chrome",
+    googlechrome: "Google Chrome",
+    chrome: "Google Chrome",
+    谷歌: "Google Chrome",
+    谷歌浏览器: "Google Chrome",
+    vscode: "VS Code",
+    visualstudiocode: "VS Code",
+    code: "VS Code"
+  };
+  return aliases[normalized] ?? query;
+}
+
+// 归一化用户口中的默认应用类别.
+function normalizeDefaultApplicationKind(rawKind: string): string {
+  const kind = rawKind.trim().replace(/[。.!！?？]+$/, "");
+  const normalized = kind.toLowerCase().replace(/\s+/g, "");
+  const aliases: Record<string, string> = {
+    browser: "浏览器",
+    webbrowser: "浏览器",
+    浏览器: "浏览器",
+    网页浏览器: "浏览器"
+  };
+  return aliases[normalized] ?? kind;
 }
 
 // 根据搜索词生成默认 Bing 搜索 URL.
