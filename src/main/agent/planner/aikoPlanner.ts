@@ -1,5 +1,6 @@
 import type { PendingActionDto } from "../../../shared/ipcTypes";
 import { describePendingAction } from "../../ai/aikoVoice";
+import { detectCurrentKnowledgeIntent } from "../knowledge/currentKnowledgeProvider";
 import type { AikoPlan, PlannerInput } from "../types";
 
 export type AikoPlanner = {
@@ -60,6 +61,7 @@ function detectFirstDeterministicAction(userText: string, userTranscript: string
 // 从用户输入中识别可以本地确定处理的简单动作.
 export function detectDeterministicAction(input: string): DetectedAction | null {
   const text = input.trim();
+  if (detectCurrentKnowledgeIntent(text)) return null;
 
   const defaultApplicationMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:将|把)?默认(.+?)改成\s*(.+)$/);
   if (defaultApplicationMatch?.[1] && defaultApplicationMatch?.[2]) {

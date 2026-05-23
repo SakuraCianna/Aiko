@@ -3,6 +3,7 @@ import type { PendingActionDto } from "../../shared/ipcTypes";
 import type { RecalledMemory } from "../memory/memoryRecall";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { SpeechUnderstandingResult } from "../voice/voiceTypes";
+import type { CurrentKnowledgeContext } from "./knowledge/currentKnowledgeProvider";
 import type { WebResearchContext } from "./retriever/webTypes";
 
 export type AgentTextPart = { type: "text"; text: string };
@@ -25,6 +26,7 @@ export type RetrievedContext = {
   memories: RecalledMemory[];
   speechResults: SpeechUnderstandingResult[];
   webResearch: WebResearchContext | null;
+  currentKnowledge: CurrentKnowledgeContext | null;
   toolHints: ToolHint[];
 };
 

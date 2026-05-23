@@ -116,6 +116,41 @@ describe("createAikoAgentRuntime", () => {
     expect(response).toEqual({ message: "先处理最重要的一项,再安排复习和休息." });
   });
 
+  it("injects fixed current-knowledge results before calling the model", async () => {
+    let invokeInput = "";
+    const runtime = createAikoAgentRuntime({
+      currentKnowledgeProvider: {
+        async retrieve() {
+          return {
+            kind: "weather",
+            title: "北京天气",
+            query: "北京",
+            source: "Open-Meteo",
+            sourceUrl: "https://open-meteo.com/en/docs",
+            createdAt: "2026-05-23T00:00:00.000Z",
+            summary: "当前 23.5°C, 多云.",
+            facts: [{ label: "当前气温", value: "23.5°C" }],
+            links: []
+          };
+        }
+      },
+      agent: {
+        async invoke(input) {
+          invokeInput = JSON.stringify(input);
+          return {
+            messages: [{ role: "assistant", content: "我查到北京现在约 23.5°C, 天气多云." }]
+          };
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("查一下北京今天的天气"));
+
+    expect(response.message).toContain("23.5");
+    expect(invokeInput).toContain("本地实时工具结果");
+    expect(invokeInput).toContain("Open-Meteo");
+  });
+
   it("records retriever and planner lifecycle events for each request", async () => {
     const traceRecorder = createAikoTraceRecorder();
     const runtime = createAikoAgentRuntime({

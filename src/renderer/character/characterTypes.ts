@@ -19,7 +19,24 @@ export type CharacterMotion =
   | "success"
   | "failure"
   | "tap"
-  | "drag";
+  | "drag"
+  | "search"
+  | "write"
+  | "explain"
+  | "celebrate"
+  | "deny"
+  | "settle"
+  | "curious"
+  | "ponder"
+  | "present"
+  | "proud"
+  | "confused"
+  | "shy"
+  | "wake"
+  | "interrupt"
+  | "dragHold"
+  | "errorRecover"
+  | "emphasis";
 
 export type CharacterBehavior =
   | "idle"
@@ -30,7 +47,13 @@ export type CharacterBehavior =
   | "confirming"
   | "success"
   | "failure"
-  | "asleep";
+  | "asleep"
+  | "searching"
+  | "writing"
+  | "curious"
+  | "presenting"
+  | "shy"
+  | "recovering";
 
 export type CharacterRendererConfig = {
   vrmPath: string;

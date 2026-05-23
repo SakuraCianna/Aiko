@@ -17,6 +17,8 @@ import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import { classifyMemoryCandidate, extractMemoryCandidates } from "../memory/silentMemoryWorker";
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
+import { createCurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
+import type { CurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
 import { createTavilyWebSearchProvider } from "./mcp/tavilyMcpProvider";
 import { buildSearchUrl, createAikoPlanner } from "./planner/aikoPlanner";
 import { createAikoRetriever } from "./retriever/aikoRetriever";
@@ -85,6 +87,7 @@ export type AikoAgentRuntimeOptions = {
   memoryCandidateExtractor?: MemoryCandidateExtractor;
   webRetriever?: WebRetriever;
   traceRecorder?: AikoTraceRecorder;
+  currentKnowledgeProvider?: CurrentKnowledgeProvider;
   maxConversationMessages?: number;
   maxConversationContextChars?: number;
 };
@@ -98,11 +101,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     options.speechUnderstandingProvider;
   const toolRegistry = createDefaultToolRegistry();
   const webRetriever = options.webRetriever ?? createDefaultWebRetriever(options.config);
+  const currentKnowledgeProvider = options.currentKnowledgeProvider ?? createCurrentKnowledgeProvider();
   const retriever = createAikoRetriever({
     memoryRuntime: options.memoryRuntime,
     speechUnderstandingProvider,
     toolRegistry,
-    webRetriever
+    webRetriever,
+    currentKnowledgeProvider
   });
   const planner = createAikoPlanner();
   const executor = createAikoExecutor();
@@ -139,7 +144,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     throwIfAborted(signal);
     trace.add("retriever.completed", {
       memoryCount: context.memories.length,
-      attachmentCount: context.attachmentSummaries.length
+      attachmentCount: context.attachmentSummaries.length,
+      currentKnowledgeKind: context.currentKnowledge?.kind ?? null
     });
 
     const plan = await planner.plan({

@@ -64,7 +64,7 @@ describe("createTavilyWebSearchProvider", () => {
     expect(invoke).toHaveBeenCalledWith(
       expect.objectContaining({
         query: "LangChain MCP",
-        max_results: 2
+        max_results: 5
       }),
       expect.objectContaining({
         timeout: 15000
@@ -169,6 +169,35 @@ describe("normalizeTavilySearchOutput", () => {
       url: "https://example.com/aiko",
       source: "tavily-mcp"
     });
+  });
+
+  it("accepts Tavily MCP detailed text output", () => {
+    const results = normalizeTavilySearchOutput(`
+Detailed Results:
+
+Title: ABC News Live Prime: May 22, 2026
+URL: https://www.youtube.com/watch?v=FZ210FL9qt4
+Content: New details on major news stories and the next phase of AI.
+
+Title: PBS News Hour full episode, May 22, 2026
+URL: https://www.youtube.com/watch?v=A8qkohvRDSA
+Content: Friday on the News Hour, a high-profile resignation and other headlines.
+`);
+
+    expect(results).toEqual([
+      {
+        title: "ABC News Live Prime: May 22, 2026",
+        url: "https://www.youtube.com/watch?v=FZ210FL9qt4",
+        snippet: "New details on major news stories and the next phase of AI.",
+        source: "tavily-mcp"
+      },
+      {
+        title: "PBS News Hour full episode, May 22, 2026",
+        url: "https://www.youtube.com/watch?v=A8qkohvRDSA",
+        snippet: "Friday on the News Hour, a high-profile resignation and other headlines.",
+        source: "tavily-mcp"
+      }
+    ]);
   });
 });
 

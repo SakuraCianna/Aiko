@@ -11,6 +11,12 @@ import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { isCancellationCommand } from "./chat/cancelCommand";
+import {
+  selectActionResultCue,
+  selectCancelMotion,
+  selectInitialCharacterCue,
+  selectSpeechMotion
+} from "./character/motionCues";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
 
 // 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
@@ -26,12 +32,17 @@ export function App() {
   const hideControlsTimerRef = useRef<number | null>(null);
   const characterIdleTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
+  const streamMotionPlayedRef = useRef(false);
 
   useEffect(() => {
     speechControllerRef.current = createAikoSpeechController();
     const unsubscribeStreamDeltas = window.aiko.onChatStreamDelta((delta) => {
       if (!isActiveRequest(delta.requestId)) return;
       setCharacterBehaviorNow("speaking");
+      if (!streamMotionPlayedRef.current && delta.text.trim().length > 0) {
+        streamMotionPlayedRef.current = true;
+        requestCharacterMotion("explain");
+      }
       setMessage((current) => (current === "正在思考..." ? delta.text : `${current}${delta.text}`));
       showControls();
     });
@@ -63,10 +74,12 @@ export function App() {
     cancelPreviousResponseBeforeNewRequest();
     const requestId = crypto.randomUUID();
     activeStreamIdRef.current = requestId;
+    streamMotionPlayedRef.current = false;
     setPendingAction(null);
     setMessage("正在思考...");
-    setCharacterBehaviorNow("thinking");
-    requestCharacterMotion("think");
+    const initialCue = selectInitialCharacterCue(payload);
+    setCharacterBehaviorNow(initialCue.behavior);
+    requestCharacterMotion(initialCue.motion);
     showControls();
 
     try {
@@ -76,8 +89,7 @@ export function App() {
       setMessage(response.message);
       showControls();
       if (response.pendingAction) {
-        requestCharacterMotion("notice");
-        speakAiko(response.message, "confirming");
+        speakAiko(response.message, "confirming", "speaking", "notice");
         setPendingAction({
           id: response.pendingAction.id,
           title: response.pendingAction.title,
@@ -89,7 +101,6 @@ export function App() {
           choices: response.pendingAction.choices
         });
       } else {
-        requestCharacterMotion("nod");
         speakAiko(response.message, "idle");
       }
     } catch {
@@ -98,8 +109,7 @@ export function App() {
       const fallbackMessage = "我这边暂时没有收到回复, 但本地功能还在.";
       setMessage(fallbackMessage);
       setCharacterBehaviorNow("failure");
-      requestCharacterMotion("failure");
-      speakAiko(fallbackMessage, "idle");
+      speakAiko(fallbackMessage, "idle", "failure", "deny");
       showControls();
     }
   }
@@ -116,7 +126,7 @@ export function App() {
       const cancelMessage = "已中止. 我先停下.";
       setMessage(cancelMessage);
       setCharacterBehaviorNow("idle");
-      requestCharacterMotion("shake");
+      requestCharacterMotion(selectCancelMotion(true));
       showControls();
       return;
     }
@@ -144,9 +154,9 @@ export function App() {
       action: selectedAction,
       remember
     });
+    const resultCue = selectActionResultCue(result.ok);
     setMessage(result.message);
-    requestCharacterMotion(result.ok ? "success" : "failure");
-    speakAiko(result.message, "idle", result.ok ? "success" : "failure");
+    speakAiko(result.message, "idle", resultCue.behavior, resultCue.motion);
     showControls();
     setPendingAction(null);
   }
@@ -158,7 +168,7 @@ export function App() {
     await window.aiko.setClickThrough(next);
     const statusMessage = next ? "点击穿透已开启. 用托盘或快捷键可以再叫我." : "点击穿透已关闭.";
     setMessage(statusMessage);
-    speakAiko(statusMessage, next ? "asleep" : "idle", next ? "asleep" : "speaking");
+    speakAiko(statusMessage, next ? "asleep" : "idle", next ? "asleep" : "speaking", next ? "settle" : "wake");
   }
 
   // 清理隐藏控件计时器, 防止卸载后继续写入状态.
@@ -195,10 +205,16 @@ export function App() {
     }, delayMs);
   }
 
-  // 用语音播放 Aiko 回复, 并把角色状态和语音生命周期同步.
-  function speakAiko(text: string, afterSpeech: CharacterBehavior = "idle", speakingBehavior: CharacterBehavior = "speaking") {
+  // 用语音播放 Aiko 回复, 并把角色状态, 动作和语音生命周期同步.
+  function speakAiko(
+    text: string,
+    afterSpeech: CharacterBehavior = "idle",
+    speakingBehavior: CharacterBehavior = "speaking",
+    motion: CharacterMotion = selectSpeechMotion(text)
+  ) {
     const controller = speechControllerRef.current;
     setCharacterBehaviorNow(speakingBehavior);
+    requestCharacterMotion(motion);
     const started = controller?.speak(text, {
       onStart: () => setCharacterBehaviorNow(speakingBehavior),
       onEnd: () => {
@@ -262,8 +278,7 @@ export function App() {
         onCancel={() => {
           const cancelMessage = "已取消. 我先把手收回来.";
           setMessage(cancelMessage);
-          requestCharacterMotion("shake");
-          speakAiko(cancelMessage, "idle", "failure");
+          speakAiko(cancelMessage, "idle", "failure", selectCancelMotion(false));
           showControls();
           setPendingAction(null);
         }}

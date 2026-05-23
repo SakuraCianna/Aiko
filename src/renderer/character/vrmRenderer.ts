@@ -24,7 +24,13 @@ const BEHAVIOR_EXPRESSION: Record<CharacterBehavior, CharacterExpression> = {
   confirming: "serious",
   success: "happy",
   failure: "worried",
-  asleep: "close"
+  asleep: "close",
+  searching: "notice",
+  writing: "thinking",
+  curious: "notice",
+  presenting: "happy",
+  shy: "smile",
+  recovering: "worried"
 };
 
 type ActiveMotion = {
@@ -43,7 +49,63 @@ const MOTION_DURATION_MS: Record<CharacterMotion, number> = {
   success: 900,
   failure: 900,
   tap: 520,
-  drag: 760
+  drag: 760,
+  search: 1300,
+  write: 1300,
+  explain: 1500,
+  celebrate: 1050,
+  deny: 850,
+  settle: 780,
+  curious: 1200,
+  ponder: 1600,
+  present: 1600,
+  proud: 1200,
+  confused: 1100,
+  shy: 1250,
+  wake: 1000,
+  interrupt: 700,
+  dragHold: 900,
+  errorRecover: 1500,
+  emphasis: 850
+};
+
+type PoseBone = { rotation: { x: number; y: number; z: number } };
+type PoseBones = {
+  hips: PoseBone | null | undefined;
+  spine: PoseBone | null | undefined;
+  chest: PoseBone | null | undefined;
+  neck: PoseBone | null | undefined;
+  head: PoseBone | null | undefined;
+  leftUpperArm: PoseBone | null | undefined;
+  rightUpperArm: PoseBone | null | undefined;
+  leftLowerArm: PoseBone | null | undefined;
+  rightLowerArm: PoseBone | null | undefined;
+  leftHand: PoseBone | null | undefined;
+  rightHand: PoseBone | null | undefined;
+};
+
+type SceneAccent = {
+  x?: number;
+  y?: number;
+  rotationY?: number;
+  rotationZ?: number;
+  scale?: number;
+};
+
+type SceneRestPose = {
+  x: number;
+  y: number;
+  rotationY: number;
+  rotationZ: number;
+  scale: number;
+};
+
+type SceneAccentState = {
+  x: number;
+  y: number;
+  rotationY: number;
+  rotationZ: number;
+  scale: number;
 };
 
 const RELAXED_LEFT_UPPER_ARM_ROTATION = { x: 0.08, y: 0, z: 0.72 };
@@ -69,6 +131,8 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
   let currentLookTarget = { x: 0, y: 0 };
   let activeMotion: ActiveMotion | null = null;
   let warnedMissingHead = false;
+  let sceneRestPose = createDefaultSceneRestPose();
+  let sceneAccentState = createEmptySceneAccentState();
   const timer = new Timer();
   timer.connect(document);
 
@@ -103,6 +167,8 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
 
       vrm = loadedVrm;
       prepareVrm(vrm);
+      sceneRestPose = readSceneRestPose(vrm);
+      sceneAccentState = createEmptySceneAccentState();
       scene.add(vrm.scene);
       applyExpression(vrm, currentExpression, mouthOpen);
       console.log("[aiko:vrm] VRM added to scene and render loop will start");
@@ -177,9 +243,9 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
       const delta = timer.getDelta();
       const elapsed = timer.getElapsed();
       if (vrm) {
-        updateIdleMotion(vrm, elapsed);
         updateCharacterBehavior(vrm, elapsed, currentBehavior);
         updateCharacterMotion(vrm, elapsed);
+        updateIdleMotion(vrm, elapsed, sceneRestPose, sceneAccentState);
         smoothLookTarget(delta);
         updateLookAt(vrm, currentLookTarget);
         applyExpression(vrm, currentExpression, resolveMouthOpen(elapsed, currentBehavior, mouthOpen));
@@ -217,10 +283,20 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
 
   // 根据当前动作状态调整躯干和手臂姿态.
   function updateCharacterMotion(vrm: VRM, elapsed: number) {
-    const chest = vrm.humanoid?.getNormalizedBoneNode("chest");
-    const spine = vrm.humanoid?.getNormalizedBoneNode("spine");
-    const leftUpperArm = vrm.humanoid?.getNormalizedBoneNode("leftUpperArm");
-    const rightUpperArm = vrm.humanoid?.getNormalizedBoneNode("rightUpperArm");
+    const bones = getPoseBones(vrm);
+    const {
+      hips,
+      spine,
+      chest,
+      neck,
+      head,
+      leftUpperArm,
+      rightUpperArm,
+      leftLowerArm,
+      rightLowerArm,
+      leftHand,
+      rightHand
+    } = bones;
 
     if (!activeMotion) {
       return;
@@ -238,38 +314,183 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
 
     switch (activeMotion.motion) {
       case "greet":
+        applySceneAccent(sceneAccentState, { x: 0.01 * wave, y: 0.018 * pulse, rotationZ: 0.02 * wave });
         setOptionalBoneRotation(chest, 0.04 * pulse, 0.04 * wave, 0.05 * pulse);
+        setOptionalBoneRotation(head, -0.02 * pulse, 0.05 * wave, 0.02 * wave);
         setOptionalBoneRotation(rightUpperArm, -0.38 * pulse, 0.08 * pulse, -0.32 * pulse + 0.2 * fastWave);
         setOptionalBoneRotation(leftUpperArm, 0, 0, 0.05 * pulse);
         break;
       case "nod":
         setOptionalBoneRotation(chest, 0.1 * fastWave, 0, 0);
+        setOptionalBoneRotation(neck, 0.08 * fastWave, 0, 0);
         break;
       case "shake":
         setOptionalBoneRotation(chest, 0, 0.12 * fastWave, 0);
+        setOptionalBoneRotation(head, 0, 0.18 * fastWave, 0);
         break;
       case "think":
+        applySceneAccent(sceneAccentState, { x: -0.008 * pulse, rotationZ: -0.018 * pulse });
         setOptionalBoneRotation(chest, -0.04 * pulse, -0.05 * pulse, -0.03 * pulse);
+        setOptionalBoneRotation(neck, -0.05 * pulse, -0.05 * pulse, 0.02 * pulse);
         setOptionalBoneRotation(rightUpperArm, -0.12 * pulse, 0, -0.16 * pulse);
         break;
       case "notice":
+        applySceneAccent(sceneAccentState, { y: 0.02 * pulse, scale: 0.012 * pulse });
         setOptionalBoneRotation(chest, 0.08 * pulse, 0, 0);
+        setOptionalBoneRotation(head, -0.03 * pulse, 0, 0);
         break;
       case "success":
+        applySceneAccent(sceneAccentState, { y: 0.025 * pulse, rotationZ: 0.025 * wave, scale: 0.012 * pulse });
         setOptionalBoneRotation(chest, 0.06 * pulse, 0, 0.04 * wave);
         setOptionalBoneRotation(rightUpperArm, -0.42 * pulse, 0, -0.2 * pulse);
         setOptionalBoneRotation(leftUpperArm, -0.24 * pulse, 0, 0.18 * pulse);
         break;
       case "failure":
+        applySceneAccent(sceneAccentState, { y: -0.015 * pulse, rotationZ: -0.02 * pulse });
         setOptionalBoneRotation(chest, -0.08 * pulse, 0.04 * wave, -0.04 * pulse);
+        setOptionalBoneRotation(head, 0.05 * pulse, -0.03 * wave, 0.04 * pulse);
         break;
       case "tap":
+        applySceneAccent(sceneAccentState, { y: 0.015 * pulse, rotationZ: 0.02 * wave });
         setOptionalBoneRotation(chest, 0.04 * pulse, 0, 0.04 * wave);
         break;
       case "drag":
+      case "dragHold":
+        applySceneAccent(sceneAccentState, { x: 0.02 * wave, y: 0.01 * pulse, rotationZ: 0.08 * pulse });
+        setOptionalBoneRotation(hips, 0, 0, 0.04 * pulse);
         setOptionalBoneRotation(chest, 0, 0.03 * wave, 0.06 * pulse);
         setOptionalBoneRotation(leftUpperArm, 0.08 * pulse, 0, 0.08 * pulse);
         setOptionalBoneRotation(rightUpperArm, 0.08 * pulse, 0, -0.08 * pulse);
+        break;
+      case "search":
+        applySceneAccent(sceneAccentState, { x: 0.018 * wave, rotationY: 0.05 * wave, rotationZ: 0.012 * fastWave });
+        setOptionalBoneRotation(hips, 0, 0.04 * wave, -0.012 * fastWave);
+        setOptionalBoneRotation(chest, -0.03 + 0.05 * pulse, 0.16 * wave, 0.025 * fastWave);
+        setOptionalBoneRotation(spine, -0.015 * pulse, 0.05 * wave, 0);
+        setOptionalBoneRotation(neck, -0.02 * pulse, 0.18 * wave, -0.02 * wave);
+        setOptionalBoneRotation(head, 0, 0.22 * wave, -0.04 * wave);
+        setOptionalBoneRotation(leftUpperArm, -0.05 * pulse, 0.03 * wave, 0.2 + 0.08 * pulse);
+        setOptionalBoneRotation(rightUpperArm, -0.05 * pulse, -0.03 * wave, -0.2 - 0.08 * pulse);
+        break;
+      case "write":
+        applySceneAccent(sceneAccentState, { x: -0.012 * pulse, y: -0.005 * pulse, rotationZ: -0.018 * pulse });
+        setOptionalBoneRotation(hips, -0.02 * pulse, 0, -0.015 * pulse);
+        setOptionalBoneRotation(chest, -0.05 * pulse, -0.03 * wave, -0.02 * pulse);
+        setOptionalBoneRotation(neck, -0.08 * pulse, -0.02 * pulse, 0.02 * wave);
+        setOptionalBoneRotation(rightUpperArm, -0.2 * pulse, 0.04, -0.24 * pulse);
+        setOptionalBoneRotation(rightLowerArm, -0.22 * pulse, 0, -0.18 * fastWave);
+        setOptionalBoneRotation(rightHand, 0.02 * fastWave, 0, -0.12 * fastWave);
+        setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.1 * pulse);
+        break;
+      case "explain":
+        applySceneAccent(sceneAccentState, { x: 0.012 * wave, y: 0.008 * pulse, rotationZ: 0.012 * fastWave });
+        setOptionalBoneRotation(chest, 0.03 * pulse, 0.06 * wave, 0.03 * fastWave);
+        setOptionalBoneRotation(neck, -0.025 * pulse, 0.05 * wave, 0.02 * wave);
+        setOptionalBoneRotation(leftUpperArm, -0.12 * pulse, 0.03 * wave, 0.22 + 0.1 * fastWave);
+        setOptionalBoneRotation(rightUpperArm, -0.12 * pulse, -0.03 * wave, -0.22 - 0.1 * fastWave);
+        setOptionalBoneRotation(leftLowerArm, -0.08 * pulse, 0, 0.12 * wave);
+        setOptionalBoneRotation(rightLowerArm, -0.08 * pulse, 0, -0.12 * wave);
+        break;
+      case "celebrate":
+        applySceneAccent(sceneAccentState, { y: 0.045 * pulse, rotationZ: 0.06 * wave, scale: 0.018 * pulse });
+        setOptionalBoneRotation(hips, 0.04 * pulse, 0, 0.02 * wave);
+        setOptionalBoneRotation(chest, 0.08 * pulse, 0, 0.08 * wave);
+        setOptionalBoneRotation(head, -0.04 * pulse, 0.04 * wave, 0.04 * wave);
+        setOptionalBoneRotation(leftUpperArm, -0.42 * pulse, 0.05 * wave, 0.42 * pulse);
+        setOptionalBoneRotation(rightUpperArm, -0.42 * pulse, -0.05 * wave, -0.42 * pulse);
+        setOptionalBoneRotation(leftLowerArm, -0.2 * pulse, 0, 0.18 * fastWave);
+        setOptionalBoneRotation(rightLowerArm, -0.2 * pulse, 0, -0.18 * fastWave);
+        break;
+      case "deny":
+        applySceneAccent(sceneAccentState, { x: -0.012 * pulse, rotationZ: -0.02 * pulse });
+        setOptionalBoneRotation(chest, -0.04 * pulse, 0.16 * fastWave, -0.02 * pulse);
+        setOptionalBoneRotation(head, 0, 0.18 * fastWave, 0);
+        setOptionalBoneRotation(leftUpperArm, 0.04, 0, 0.05 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.04, 0, -0.05 * pulse);
+        break;
+      case "settle":
+        applySceneAccent(sceneAccentState, { y: -0.012 * pulse, rotationZ: -0.015 * pulse });
+        setOptionalBoneRotation(chest, -0.035 * pulse, 0, 0.02 * wave);
+        setOptionalBoneRotation(spine, -0.015 * pulse, 0, 0);
+        setOptionalBoneRotation(leftUpperArm, 0.04 * pulse, 0, 0.08 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.04 * pulse, 0, -0.08 * pulse);
+        break;
+      case "curious":
+        applySceneAccent(sceneAccentState, { x: 0.01 * pulse, y: 0.008 * pulse, rotationZ: -0.045 * pulse });
+        setOptionalBoneRotation(hips, 0, 0.02 * wave, -0.018 * pulse);
+        setOptionalBoneRotation(chest, -0.02 * pulse, 0.05 * wave, -0.05 * pulse);
+        setOptionalBoneRotation(neck, -0.05 * pulse, 0.08 * wave, -0.12 * pulse);
+        setOptionalBoneRotation(head, -0.03 * pulse, 0.08 * wave, -0.16 * pulse);
+        setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.12 * pulse);
+        break;
+      case "ponder":
+        applySceneAccent(sceneAccentState, { x: -0.008 * pulse, rotationZ: -0.02 * pulse });
+        setOptionalBoneRotation(chest, -0.055 * pulse, -0.04 * pulse, -0.035 * pulse);
+        setOptionalBoneRotation(neck, -0.08 * pulse, -0.04 * pulse, 0.04 * pulse);
+        setOptionalBoneRotation(rightUpperArm, -0.2 * pulse, 0.02, -0.28 * pulse);
+        setOptionalBoneRotation(rightLowerArm, -0.18 * pulse, 0, -0.2 * pulse);
+        setOptionalBoneRotation(rightHand, 0, 0, -0.08 * pulse);
+        break;
+      case "present":
+        applySceneAccent(sceneAccentState, { y: 0.018 * pulse, rotationZ: 0.018 * wave, scale: 0.01 * pulse });
+        setOptionalBoneRotation(chest, 0.045 * pulse, 0.04 * wave, 0.025 * wave);
+        setOptionalBoneRotation(neck, -0.02 * pulse, 0.04 * wave, 0.02 * wave);
+        setOptionalBoneRotation(leftUpperArm, -0.22 * pulse, 0.08 * pulse, 0.34 * pulse);
+        setOptionalBoneRotation(rightUpperArm, -0.22 * pulse, -0.08 * pulse, -0.34 * pulse);
+        setOptionalBoneRotation(leftLowerArm, -0.12 * pulse, 0, 0.18 * pulse);
+        setOptionalBoneRotation(rightLowerArm, -0.12 * pulse, 0, -0.18 * pulse);
+        break;
+      case "proud":
+        applySceneAccent(sceneAccentState, { y: 0.024 * pulse, rotationZ: 0.018 * wave, scale: 0.014 * pulse });
+        setOptionalBoneRotation(hips, 0.03 * pulse, 0, 0);
+        setOptionalBoneRotation(chest, 0.095 * pulse, 0, 0.025 * wave);
+        setOptionalBoneRotation(neck, -0.055 * pulse, 0, 0);
+        setOptionalBoneRotation(leftUpperArm, -0.1 * pulse, 0, 0.18 * pulse);
+        setOptionalBoneRotation(rightUpperArm, -0.1 * pulse, 0, -0.18 * pulse);
+        break;
+      case "confused":
+        applySceneAccent(sceneAccentState, { x: 0.012 * wave, y: -0.008 * pulse, rotationZ: 0.05 * wave });
+        setOptionalBoneRotation(chest, -0.04 * pulse, 0.09 * wave, 0.04 * wave);
+        setOptionalBoneRotation(neck, 0.02 * pulse, 0.12 * wave, 0.08 * wave);
+        setOptionalBoneRotation(head, 0.02 * pulse, 0.16 * wave, 0.12 * wave);
+        setOptionalBoneRotation(leftUpperArm, 0.04, 0, 0.06 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.04, 0, -0.06 * pulse);
+        break;
+      case "shy":
+        applySceneAccent(sceneAccentState, { y: -0.016 * pulse, rotationZ: -0.03 * pulse });
+        setOptionalBoneRotation(hips, -0.02 * pulse, 0, -0.015 * pulse);
+        setOptionalBoneRotation(chest, -0.07 * pulse, -0.035 * pulse, -0.04 * pulse);
+        setOptionalBoneRotation(neck, 0.08 * pulse, -0.03 * pulse, -0.04 * pulse);
+        setOptionalBoneRotation(head, 0.09 * pulse, -0.04 * pulse, -0.05 * pulse);
+        setOptionalBoneRotation(leftUpperArm, 0.09 * pulse, 0, 0.16 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.09 * pulse, 0, -0.16 * pulse);
+        break;
+      case "wake":
+        applySceneAccent(sceneAccentState, { y: 0.035 * pulse, rotationZ: -0.02 * wave, scale: 0.012 * pulse });
+        setOptionalBoneRotation(chest, -0.04 + 0.12 * pulse, 0.03 * wave, 0.02 * wave);
+        setOptionalBoneRotation(neck, 0.08 - 0.14 * pulse, 0.02 * wave, 0);
+        setOptionalBoneRotation(head, 0.08 - 0.16 * pulse, 0.04 * wave, 0);
+        break;
+      case "interrupt":
+        applySceneAccent(sceneAccentState, { x: -0.018 * pulse, y: -0.012 * pulse, rotationZ: -0.06 * pulse });
+        setOptionalBoneRotation(chest, -0.08 * pulse, 0.2 * fastWave, -0.05 * pulse);
+        setOptionalBoneRotation(neck, 0.04 * pulse, 0.16 * fastWave, 0);
+        setOptionalBoneRotation(leftUpperArm, 0.1 * pulse, 0, 0.16 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.1 * pulse, 0, -0.16 * pulse);
+        break;
+      case "errorRecover":
+        applySceneAccent(sceneAccentState, { y: -0.018 * pulse + 0.014 * Math.sin(progress * Math.PI * 3), rotationZ: -0.025 * pulse });
+        setOptionalBoneRotation(chest, -0.08 * pulse + 0.035 * Math.sin(progress * Math.PI * 3), 0.03 * wave, -0.035 * pulse);
+        setOptionalBoneRotation(neck, 0.08 * pulse - 0.05 * Math.sin(progress * Math.PI * 3), 0.04 * wave, 0.02 * wave);
+        setOptionalBoneRotation(head, 0.06 * pulse - 0.06 * Math.sin(progress * Math.PI * 3), 0.04 * wave, 0.03 * wave);
+        break;
+      case "emphasis":
+        applySceneAccent(sceneAccentState, { y: 0.02 * pulse, rotationZ: 0.035 * wave, scale: 0.008 * pulse });
+        setOptionalBoneRotation(chest, 0.055 * pulse, 0.03 * wave, 0.035 * wave);
+        setOptionalBoneRotation(neck, -0.04 * pulse, 0.03 * wave, 0);
+        setOptionalBoneRotation(rightUpperArm, -0.22 * pulse, 0.04, -0.26 * pulse);
+        setOptionalBoneRotation(rightLowerArm, -0.16 * pulse, 0, -0.18 * pulse);
+        setOptionalBoneRotation(rightHand, -0.04 * pulse, 0, -0.16 * pulse);
         break;
       case "idle":
         activeMotion = null;
@@ -282,18 +503,26 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
 
 // 根据持续行为调整角色的基础姿态.
 function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterBehavior) {
-  const chest = vrm.humanoid?.getNormalizedBoneNode("chest");
-  const spine = vrm.humanoid?.getNormalizedBoneNode("spine");
-  const leftUpperArm = vrm.humanoid?.getNormalizedBoneNode("leftUpperArm");
-  const rightUpperArm = vrm.humanoid?.getNormalizedBoneNode("rightUpperArm");
-  const leftLowerArm = vrm.humanoid?.getNormalizedBoneNode("leftLowerArm");
-  const rightLowerArm = vrm.humanoid?.getNormalizedBoneNode("rightLowerArm");
+  const {
+    hips,
+    spine,
+    chest,
+    neck,
+    head,
+    leftUpperArm,
+    rightUpperArm,
+    leftLowerArm,
+    rightLowerArm,
+    leftHand,
+    rightHand
+  } = getPoseBones(vrm);
   const wave = Math.sin(elapsed * 2.2);
   const slowWave = Math.sin(elapsed * 1.1);
 
   switch (behavior) {
     case "listening":
       setOptionalBoneRotation(chest, 0.02, 0.02 * slowWave, 0.018);
+      setOptionalBoneRotation(neck, -0.018, 0.04 * slowWave, 0.018);
       setOptionalBoneRotation(spine, 0, 0, 0.012);
       setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.02);
       setOptionalBoneRotation(rightUpperArm, 0.02, 0, -0.02);
@@ -301,6 +530,7 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
     case "thinking":
       setOptionalBoneRotation(chest, -0.035 + 0.01 * slowWave, -0.045, -0.025);
       setOptionalBoneRotation(spine, -0.02, -0.02, 0);
+      setOptionalBoneRotation(neck, -0.04 + 0.01 * slowWave, -0.035, 0.02);
       setOptionalBoneRotation(rightUpperArm, -0.16, 0.02, -0.2);
       setOptionalBoneRotation(rightLowerArm, -0.1, 0, -0.12);
       setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.04);
@@ -308,6 +538,7 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
     case "speaking":
       setOptionalBoneRotation(chest, 0.018 * wave, 0.026 * slowWave, 0.018 * wave);
       setOptionalBoneRotation(spine, 0, 0.012 * wave, 0);
+      setOptionalBoneRotation(neck, -0.012 + 0.01 * wave, 0.026 * slowWave, 0.01 * wave);
       setOptionalBoneRotation(leftUpperArm, 0.04 * slowWave, 0, 0.08 + 0.03 * wave);
       setOptionalBoneRotation(rightUpperArm, 0.04 * slowWave, 0, -0.08 - 0.03 * wave);
       break;
@@ -338,6 +569,55 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
       setOptionalBoneRotation(spine, -0.025, 0, 0);
       setOptionalBoneRotation(leftUpperArm, 0.06, 0, 0.03);
       setOptionalBoneRotation(rightUpperArm, 0.06, 0, -0.03);
+      break;
+    case "searching":
+      setOptionalBoneRotation(chest, -0.02 + 0.012 * slowWave, 0.025 * wave, 0.018 * slowWave);
+      setOptionalBoneRotation(spine, -0.012, 0.018 * slowWave, 0);
+      setOptionalBoneRotation(neck, -0.018, 0.05 * wave, 0.012 * slowWave);
+      setOptionalBoneRotation(leftUpperArm, 0.03, 0, 0.16 + 0.025 * wave);
+      setOptionalBoneRotation(rightUpperArm, 0.03, 0, -0.16 - 0.025 * wave);
+      break;
+    case "writing":
+      setOptionalBoneRotation(chest, -0.045 + 0.01 * slowWave, -0.018, -0.018);
+      setOptionalBoneRotation(spine, -0.018, -0.01, 0);
+      setOptionalBoneRotation(neck, -0.045, -0.012, 0.01 * slowWave);
+      setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.08);
+      setOptionalBoneRotation(rightUpperArm, -0.14 + 0.02 * wave, 0.02, -0.22);
+      setOptionalBoneRotation(rightLowerArm, -0.18, 0, -0.12 + 0.03 * wave);
+      setOptionalBoneRotation(rightHand, 0.02 * wave, 0, -0.08 + 0.02 * wave);
+      break;
+    case "curious":
+      setOptionalBoneRotation(hips, 0, 0.012 * slowWave, -0.012);
+      setOptionalBoneRotation(chest, -0.018, 0.025 * slowWave, -0.045);
+      setOptionalBoneRotation(neck, -0.035, 0.035 * slowWave, -0.09);
+      setOptionalBoneRotation(head, -0.025, 0.04 * slowWave, -0.12);
+      setOptionalBoneRotation(leftUpperArm, 0.02, 0, 0.1);
+      setOptionalBoneRotation(rightUpperArm, 0.02, 0, -0.04);
+      break;
+    case "presenting":
+      setOptionalBoneRotation(chest, 0.03 + 0.014 * wave, 0.02 * slowWave, 0.012 * wave);
+      setOptionalBoneRotation(neck, -0.025, 0.025 * slowWave, 0);
+      setOptionalBoneRotation(leftUpperArm, -0.12 + 0.02 * wave, 0.04, 0.26);
+      setOptionalBoneRotation(rightUpperArm, -0.12 - 0.02 * wave, -0.04, -0.26);
+      setOptionalBoneRotation(leftLowerArm, -0.06, 0, 0.08 + 0.02 * wave);
+      setOptionalBoneRotation(rightLowerArm, -0.06, 0, -0.08 - 0.02 * wave);
+      break;
+    case "shy":
+      setOptionalBoneRotation(hips, -0.012, 0, -0.008);
+      setOptionalBoneRotation(chest, -0.055 + 0.01 * slowWave, -0.018, -0.035);
+      setOptionalBoneRotation(neck, 0.045, -0.018, -0.035);
+      setOptionalBoneRotation(head, 0.055, -0.02, -0.045);
+      setOptionalBoneRotation(leftUpperArm, 0.07, 0, 0.13);
+      setOptionalBoneRotation(rightUpperArm, 0.07, 0, -0.13);
+      setOptionalBoneRotation(leftHand, 0, 0, 0.08);
+      setOptionalBoneRotation(rightHand, 0, 0, -0.08);
+      break;
+    case "recovering":
+      setOptionalBoneRotation(chest, -0.05 + 0.018 * slowWave, 0.014 * wave, -0.024);
+      setOptionalBoneRotation(spine, -0.018, 0, 0);
+      setOptionalBoneRotation(neck, 0.035 - 0.012 * slowWave, 0.02 * wave, 0.012 * wave);
+      setOptionalBoneRotation(leftUpperArm, 0.045, 0, 0.04);
+      setOptionalBoneRotation(rightUpperArm, 0.045, 0, -0.04);
       break;
     case "idle":
     default:
@@ -433,15 +713,97 @@ function applyExpression(vrm: VRM, expression: CharacterExpression, mouthOpen: n
   manager.update();
 }
 
-// 更新轻微待机浮动和动作回弹.
-function updateIdleMotion(vrm: VRM, elapsed: number) {
-  vrm.scene.rotation.z *= 0.92;
-  vrm.scene.position.y = -0.76 + Math.sin(elapsed * 1.4) * 0.012;
+// 更新轻微待机浮动和动作回弹, 并保留 VRM 修正后的基础朝向.
+function updateIdleMotion(vrm: VRM, elapsed: number, sceneRestPose: SceneRestPose, sceneAccentState: SceneAccentState) {
+  decaySceneAccent(sceneAccentState);
+  vrm.scene.position.x = sceneRestPose.x + sceneAccentState.x;
+  vrm.scene.position.y = sceneRestPose.y + Math.sin(elapsed * 1.4) * 0.012 + sceneAccentState.y;
+  vrm.scene.rotation.y = sceneRestPose.rotationY + sceneAccentState.rotationY;
+  vrm.scene.rotation.z = sceneRestPose.rotationZ + sceneAccentState.rotationZ;
+  vrm.scene.scale.setScalar(sceneRestPose.scale * (1 + sceneAccentState.scale));
+}
+
+// 一次性动作只写入临时偏移, 不直接覆盖 VRM 的基础朝向.
+function applySceneAccent(state: SceneAccentState, accent: SceneAccent) {
+  state.x += accent.x ?? 0;
+  state.y += accent.y ?? 0;
+  state.rotationY += accent.rotationY ?? 0;
+  state.rotationZ += accent.rotationZ ?? 0;
+  state.scale += accent.scale ?? 0;
+  clampSceneAccent(state);
+}
+
+// 每帧衰减临时动作偏移, 让模型回到读入后的原始朝向和位置.
+function decaySceneAccent(state: SceneAccentState) {
+  state.x *= 0.82;
+  state.y *= 0.72;
+  state.rotationY *= 0.78;
+  state.rotationZ *= 0.78;
+  state.scale *= 0.72;
+}
+
+// 限制临时偏移范围, 防止连续动作把模型旋转或位移积累过大.
+function clampSceneAccent(state: SceneAccentState) {
+  state.x = clamp(state.x, -0.12, 0.12);
+  state.y = clamp(state.y, -0.08, 0.08);
+  state.rotationY = clamp(state.rotationY, -0.2, 0.2);
+  state.rotationZ = clamp(state.rotationZ, -0.24, 0.24);
+  state.scale = clamp(state.scale, -0.04, 0.04);
+}
+
+// 读取模型加载和 rotateVRM0 后的静止姿态, 后续动作都围绕它做偏移.
+function readSceneRestPose(vrm: VRM): SceneRestPose {
+  return {
+    x: vrm.scene.position.x,
+    y: vrm.scene.position.y,
+    rotationY: vrm.scene.rotation.y,
+    rotationZ: vrm.scene.rotation.z,
+    scale: vrm.scene.scale.x || 1
+  };
+}
+
+// 创建默认静止姿态, 在模型加载完成前用于初始化状态.
+function createDefaultSceneRestPose(): SceneRestPose {
+  return {
+    x: 0,
+    y: -0.76,
+    rotationY: 0,
+    rotationZ: 0,
+    scale: 1
+  };
+}
+
+// 创建空的临时动作偏移状态.
+function createEmptySceneAccentState(): SceneAccentState {
+  return {
+    x: 0,
+    y: 0,
+    rotationY: 0,
+    rotationZ: 0,
+    scale: 0
+  };
+}
+
+// 收集常用 humanoid 骨骼, 让动作编排能同时使用髋部, 头颈, 手臂和手腕.
+function getPoseBones(vrm: VRM): PoseBones {
+  return {
+    hips: vrm.humanoid?.getNormalizedBoneNode("hips"),
+    spine: vrm.humanoid?.getNormalizedBoneNode("spine"),
+    chest: vrm.humanoid?.getNormalizedBoneNode("chest"),
+    neck: vrm.humanoid?.getNormalizedBoneNode("neck"),
+    head: vrm.humanoid?.getNormalizedBoneNode("head"),
+    leftUpperArm: vrm.humanoid?.getNormalizedBoneNode("leftUpperArm"),
+    rightUpperArm: vrm.humanoid?.getNormalizedBoneNode("rightUpperArm"),
+    leftLowerArm: vrm.humanoid?.getNormalizedBoneNode("leftLowerArm"),
+    rightLowerArm: vrm.humanoid?.getNormalizedBoneNode("rightLowerArm"),
+    leftHand: vrm.humanoid?.getNormalizedBoneNode("leftHand"),
+    rightHand: vrm.humanoid?.getNormalizedBoneNode("rightHand")
+  };
 }
 
 // 安全设置可选骨骼的旋转, 兼容缺少对应骨骼的 VRM.
 function setOptionalBoneRotation(
-  bone: { rotation: { x: number; y: number; z: number } } | null | undefined,
+  bone: PoseBone | null | undefined,
   x: number,
   y: number,
   z: number
@@ -454,10 +816,10 @@ function setOptionalBoneRotation(
 
 // 把 VRM 默认 T-pose 手臂压成更像桌宠待机的放松姿态.
 function setRelaxedArmPose(
-  leftUpperArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
-  rightUpperArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
-  leftLowerArm: { rotation: { x: number; y: number; z: number } } | null | undefined,
-  rightLowerArm: { rotation: { x: number; y: number; z: number } } | null | undefined
+  leftUpperArm: PoseBone | null | undefined,
+  rightUpperArm: PoseBone | null | undefined,
+  leftLowerArm: PoseBone | null | undefined,
+  rightLowerArm: PoseBone | null | undefined
 ) {
   setOptionalBoneRotation(
     leftUpperArm,
@@ -499,4 +861,9 @@ function resizeToElement(element: HTMLElement, renderer: WebGLRenderer | null, c
 // 计算容器宽高比, 并避免除以 0.
 function aspectRatio(element: HTMLElement): number {
   return Math.max(1, element.clientWidth) / Math.max(1, element.clientHeight);
+}
+
+// 把数值限制在指定区间内.
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

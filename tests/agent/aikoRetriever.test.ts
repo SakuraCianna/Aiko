@@ -137,6 +137,36 @@ describe("createAikoRetriever", () => {
       query: "LangChain MCP"
     });
   });
+
+  it("adds fixed current-knowledge context from local typed providers", async () => {
+    const retriever = createAikoRetriever({
+      currentKnowledgeProvider: {
+        async retrieve() {
+          return {
+            kind: "weather",
+            title: "北京天气",
+            query: "北京",
+            source: "Open-Meteo",
+            sourceUrl: "https://open-meteo.com/en/docs",
+            createdAt: "2026-05-23T00:00:00.000Z",
+            summary: "当前 23.5°C, 多云.",
+            facts: [{ label: "当前气温", value: "23.5°C" }],
+            links: []
+          };
+        }
+      }
+    });
+
+    const context = await retriever.retrieve(textPayload("查一下北京今天的天气"));
+
+    expect(JSON.stringify(context.userContent)).toContain("本地实时工具结果");
+    expect(JSON.stringify(context.userContent)).toContain("Open-Meteo");
+    expect(JSON.stringify(context.userContent)).toContain("当前 23.5°C");
+    expect(context.currentKnowledge).toMatchObject({
+      kind: "weather",
+      source: "Open-Meteo"
+    });
+  });
 });
 
 function textPayload(text: string): ChatPayload {

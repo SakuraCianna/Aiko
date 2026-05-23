@@ -68,19 +68,19 @@ export function createTavilyWebSearchProvider(
         }
 
         try {
-        const output = await searchTool.invoke(
-          {
-            query,
-            max_results: searchOptions.maxResults ?? config.maxResults,
-            include_answer: true,
-            include_raw_content: false,
-            search_depth: "basic"
-          },
-          {
-            timeout: config.timeoutMs
-          }
-        );
-        return normalizeTavilySearchOutput(output);
+          const output = await searchTool.invoke(
+            {
+              query,
+              max_results: normalizeMaxResults(searchOptions.maxResults ?? config.maxResults),
+              include_answer: true,
+              include_raw_content: false,
+              search_depth: "basic"
+            },
+            {
+              timeout: config.timeoutMs
+            }
+          );
+          return normalizeTavilySearchOutput(output);
         } catch (error) {
           console.warn("[aiko:mcp] Tavily search failed", {
             ...formatMcpError(error),
@@ -217,8 +217,34 @@ function parseJsonOrText(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    return null;
+    return parseDetailedTextResults(text);
   }
+}
+
+// 解析 tavily-mcp 返回的 "Detailed Results" 文本格式.
+function parseDetailedTextResults(text: string): unknown[] {
+  const results: Array<{ title: string; url: string; content: string }> = [];
+  const normalized = text.replace(/\r\n/g, "\n");
+  const pattern = /Title:\s*(.+?)\nURL:\s*(https?:\/\/\S+)\nContent:\s*([\s\S]*?)(?=\n\s*Title:|\s*$)/g;
+
+  for (const match of normalized.matchAll(pattern)) {
+    const title = match[1]?.trim();
+    const url = match[2]?.trim();
+    const content = match[3]?.trim();
+    if (!title || !url) continue;
+    results.push({
+      title,
+      url,
+      content: content ?? ""
+    });
+  }
+
+  return results;
+}
+
+// Tavily MCP 的 max_results schema 最小值是 5, 最大值是 20.
+function normalizeMaxResults(value: number): number {
+  return Math.max(5, Math.min(20, Math.trunc(value)));
 }
 
 // 读取字符串字段, 防止把对象直接塞进模型上下文.

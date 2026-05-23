@@ -2,6 +2,8 @@ import type { ChatPayload } from "../../../shared/chatPayload";
 import type { AgentImagePart, AgentTextPart, AgentUserContent, AikoMemoryRuntime, RetrievedContext } from "../types";
 import { createDefaultToolRegistry } from "../tools/toolRegistry";
 import type { AikoToolRegistry } from "../tools/toolRegistry";
+import { formatCurrentKnowledgeContext } from "../knowledge/currentKnowledgeProvider";
+import type { CurrentKnowledgeContext, CurrentKnowledgeProvider } from "../knowledge/currentKnowledgeProvider";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
 import { formatWebResearchContext } from "./webRetriever";
@@ -13,6 +15,7 @@ export type AikoRetrieverOptions = {
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   toolRegistry?: AikoToolRegistry;
   webRetriever?: WebRetriever;
+  currentKnowledgeProvider?: CurrentKnowledgeProvider;
 };
 
 export type AikoRetriever = {
@@ -30,15 +33,16 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
     async retrieve(payload) {
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
-      const [memories, webResearch] = await Promise.all([
+      const [memories, webResearch, currentKnowledge] = await Promise.all([
         recallForAgent(options.memoryRuntime, userTranscript),
-        retrieveWebResearch(options.webRetriever, payload.text, userTranscript)
+        retrieveWebResearch(options.webRetriever, payload.text, userTranscript),
+        retrieveCurrentKnowledge(options.currentKnowledgeProvider, payload.text, userTranscript)
       ]);
 
       return {
         userText: payload.text,
         userTranscript,
-        userContent: buildUserContent(payload, speechResults, memories, webResearch),
+        userContent: buildUserContent(payload, speechResults, memories, webResearch, currentKnowledge),
         attachmentSummaries: payload.attachments.map((attachment) => ({
           id: attachment.id,
           kind: attachment.kind,
@@ -49,6 +53,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
         memories,
         speechResults,
         webResearch,
+        currentKnowledge,
         toolHints: toolRegistry.list().map((tool) => ({
           name: tool.name,
           capability: tool.capability,
@@ -106,7 +111,8 @@ export function buildUserContent(
   payload: ChatPayload,
   speechResults: SpeechUnderstandingResult[],
   recalledMemories: RecalledMemory[],
-  webResearch?: WebResearchContext | null
+  webResearch?: WebResearchContext | null,
+  currentKnowledge?: CurrentKnowledgeContext | null
 ): AgentUserContent {
   const imageAttachments = payload.attachments.filter((attachment) => attachment.kind === "image");
   const audioAttachments = payload.attachments.filter((attachment) => attachment.kind === "audio");
@@ -120,7 +126,8 @@ export function buildUserContent(
   const speechContext = formatSpeechUnderstandingContext(audioAttachments.length, speechResults);
   const memoryContext = formatMemoryContext(recalledMemories);
   const webContext = formatWebResearchContext(webResearch);
-  const textContext = [text, memoryContext, speechContext, webContext].filter(Boolean).join("\n\n");
+  const currentKnowledgeContext = formatCurrentKnowledgeContext(currentKnowledge);
+  const textContext = [text, memoryContext, speechContext, currentKnowledgeContext, webContext].filter(Boolean).join("\n\n");
 
   // 文本块携带 grounding 说明, 并和可选多模态内容一起发送.
   if (imageAttachments.length === 0) {
@@ -156,6 +163,24 @@ async function retrieveWebResearch(
     return await webRetriever.retrieve({ userText, userTranscript });
   } catch (error) {
     console.warn("[aiko:web-retriever] web research failed", {
+      name: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
+// 调用固定实时知识 provider, 失败时降级为空上下文, 避免外部 API 阻断聊天.
+async function retrieveCurrentKnowledge(
+  currentKnowledgeProvider: CurrentKnowledgeProvider | undefined,
+  userText: string,
+  userTranscript: string
+): Promise<CurrentKnowledgeContext | null> {
+  if (!currentKnowledgeProvider) return null;
+  try {
+    return await currentKnowledgeProvider.retrieve({ userText, userTranscript });
+  } catch (error) {
+    console.warn("[aiko:current-knowledge] retrieval failed", {
       name: error instanceof Error ? error.name : typeof error,
       message: error instanceof Error ? error.message : String(error)
     });

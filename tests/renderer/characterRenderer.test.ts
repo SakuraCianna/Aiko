@@ -79,4 +79,76 @@ describe("character renderer migration", () => {
     expect(vrmRenderer).toContain("smoothLookTarget");
     expect(vrmRenderer).toContain("Math.exp(-LOOK_RESPONSE_RATE * delta)");
   });
+
+  it("defines richer motions for search, long writing and expressive feedback", () => {
+    const characterTypes = readFileSync("src/renderer/character/characterTypes.ts", "utf8");
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+
+    for (const motion of [
+      "search",
+      "write",
+      "explain",
+      "celebrate",
+      "deny",
+      "settle",
+      "curious",
+      "ponder",
+      "present",
+      "proud",
+      "confused",
+      "shy",
+      "wake",
+      "interrupt",
+      "dragHold",
+      "errorRecover",
+      "emphasis"
+    ]) {
+      expect(characterTypes).toContain(`| "${motion}"`);
+      expect(vrmRenderer).toContain(`case "${motion}"`);
+    }
+    for (const behavior of ["searching", "writing", "curious", "presenting", "shy", "recovering"]) {
+      expect(characterTypes).toContain(`| "${behavior}"`);
+      expect(vrmRenderer).toContain(`case "${behavior}"`);
+    }
+
+    expect(app).toContain("selectInitialCharacterCue");
+    expect(app).toContain("selectSpeechMotion");
+  });
+
+  it("uses a motion cue module so interaction semantics stay out of App", () => {
+    const motionCues = readFileSync("src/renderer/character/motionCues.ts", "utf8");
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+
+    expect(motionCues).toContain("selectInitialCharacterCue");
+    expect(motionCues).toContain("selectSpeechMotion");
+    expect(motionCues).toContain("selectActionResultCue");
+    expect(motionCues).toContain("selectCancelMotion");
+    expect(app).toContain("selectInitialCharacterCue");
+    expect(app).toContain("selectSpeechMotion");
+    expect(app).toContain("selectActionResultCue");
+    expect(app).toContain("selectCancelMotion");
+  });
+
+  it("uses scene, hips, neck and hands for stronger 3D motion instead of only chest rotation", () => {
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+
+    expect(vrmRenderer).toContain("type PoseBones");
+    expect(vrmRenderer).toContain("getPoseBones");
+    expect(vrmRenderer).toContain("applySceneAccent");
+    expect(vrmRenderer).toContain("getNormalizedBoneNode(\"hips\")");
+    expect(vrmRenderer).toContain("getNormalizedBoneNode(\"neck\")");
+    expect(vrmRenderer).toContain("getNormalizedBoneNode(\"leftHand\")");
+    expect(vrmRenderer).toContain("getNormalizedBoneNode(\"rightHand\")");
+  });
+
+  it("preserves the VRM rest facing direction when applying scene-level motion", () => {
+    const vrmRenderer = readFileSync("src/renderer/character/vrmRenderer.ts", "utf8");
+
+    expect(vrmRenderer).toContain("type SceneRestPose");
+    expect(vrmRenderer).toContain("type SceneAccentState");
+    expect(vrmRenderer).toContain("readSceneRestPose");
+    expect(vrmRenderer).toContain("sceneRestPose.rotationY");
+    expect(vrmRenderer).not.toContain("vrm.scene.rotation.y *= 0.9");
+  });
 });

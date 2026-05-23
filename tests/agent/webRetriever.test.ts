@@ -11,6 +11,8 @@ describe("shouldUseWebSearch", () => {
     expect(shouldUseWebSearch("今天有什么 AI 新闻")).toBe(true);
     expect(shouldUseWebSearch("帮我写一份项目文档")).toBe(false);
     expect(shouldUseWebSearch("陪我聊会儿")).toBe(false);
+    expect(shouldUseWebSearch("查一下北京今天的天气")).toBe(false);
+    expect(shouldUseWebSearch("历史上的今天发生了什么")).toBe(false);
   });
 });
 
@@ -37,6 +39,28 @@ describe("createWebRetriever", () => {
       provider: "tavily-mcp"
     });
     expect(result?.results).toHaveLength(1);
+  });
+
+  it("adds the current date to broad today news queries", async () => {
+    const search = vi.fn(async () => [
+      {
+        title: "News",
+        url: "https://example.com/news",
+        snippet: "Today news summary.",
+        source: "tavily-mcp"
+      }
+    ]);
+    const retriever = createWebRetriever({
+      provider: { search },
+      now: () => new Date("2026-05-23T08:00:00.000Z")
+    });
+
+    await retriever.retrieve({
+      userText: "今天的新闻是什么",
+      userTranscript: ""
+    });
+
+    expect(search).toHaveBeenCalledWith("今天的新闻是什么 2026年5月23日", { maxResults: 5 });
   });
 
   it("does not call the provider for ordinary chat", async () => {
