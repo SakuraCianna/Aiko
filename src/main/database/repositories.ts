@@ -240,9 +240,9 @@ function normalizeMemoryContent(content: string) {
 // 创建权限仓储, 负责记住和查询用户授权规则.
 export function createPermissionRepository(db: DatabaseSync) {
   return {
-    // 记住一个非高风险权限规则.
+    // 只记住低风险权限规则, 中高风险动作每次都需要确认.
     remember(rule: PermissionRule) {
-      if (rule.risk === "high") return;
+      if (rule.risk !== "low") return;
 
       const normalizedTarget = normalizeTarget(rule.target);
       db.prepare(
@@ -272,7 +272,7 @@ export function createPermissionRepository(db: DatabaseSync) {
           `
           SELECT id
           FROM permissions
-          WHERE id = ? AND revoked_at IS NULL
+          WHERE id = ? AND risk_level = 'low' AND revoked_at IS NULL
           LIMIT 1
         `
         )
@@ -288,7 +288,7 @@ export function createPermissionRepository(db: DatabaseSync) {
           `
           SELECT capability, target, risk_level
           FROM permissions
-          WHERE revoked_at IS NULL
+          WHERE risk_level = 'low' AND revoked_at IS NULL
           ORDER BY created_at ASC, capability ASC, target ASC
         `
         )

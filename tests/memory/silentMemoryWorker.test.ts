@@ -88,6 +88,21 @@ describe("extractMemoryCandidates", () => {
       }
     ]);
   });
+
+  it("filters overlong memory candidates to reduce memory poisoning risk", async () => {
+    const candidates = await extractMemoryCandidates("用户:记住一大段内容", async () =>
+      JSON.stringify([
+        {
+          type: "preference",
+          content: "x".repeat(1000),
+          confidence: 0.9,
+          requiresConfirmation: false
+        }
+      ])
+    );
+
+    expect(candidates).toEqual([]);
+  });
 });
 
 describe("recallMemories", () => {

@@ -46,6 +46,14 @@ describe("Aiko agent architecture boundary", () => {
     expect(ipcHandlers).toContain("pendingActions.clear()");
   });
 
+  it("does not auto-execute unremembered open-application actions from the agent", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("if (actionExecutor.isRememberedAction(decision.action))");
+    expect(ipcHandlers).toContain("await actionExecutor.execute({ action: decision.action, remember: false })");
+    expect(ipcHandlers).toContain("return { message, pendingAction: storePendingAction(decision.action) }");
+  });
+
   it("documents that future agent work must extend the LangChain runtime", () => {
     const architectureDoc = join("docs", "agent-architecture.md");
 

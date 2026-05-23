@@ -1,5 +1,6 @@
 import type { MemoryCandidate, MemoryStatus } from "./memoryTypes";
 
+const MAX_MEMORY_CANDIDATE_CONTENT_LENGTH = 800;
 const confirmationTypes = new Set<MemoryCandidate["type"]>(["reminder", "permission", "sensitive"]);
 const memoryTypes = new Set<MemoryCandidate["type"]>([
   "preference",
@@ -45,6 +46,7 @@ function isMemoryCandidate(item: unknown): item is MemoryCandidate {
     memoryTypes.has(candidate.type as MemoryCandidate["type"]) &&
     typeof candidate.content === "string" &&
     candidate.content.trim().length > 0 &&
+    candidate.content.trim().length <= MAX_MEMORY_CANDIDATE_CONTENT_LENGTH &&
     typeof candidate.confidence === "number" &&
     Number.isFinite(candidate.confidence) &&
     candidate.confidence >= 0 &&

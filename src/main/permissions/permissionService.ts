@@ -10,6 +10,7 @@ export type PermissionRule = {
 export function createPermissionService(initialRules: PermissionRule[]) {
   const rules = new Map<string, PermissionRule>();
   for (const rule of initialRules) {
+    if (rule.risk !== "low") continue;
     rules.set(ruleKey(rule), rule);
   }
 
@@ -20,16 +21,16 @@ export function createPermissionService(initialRules: PermissionRule[]) {
         return { allowed: false, reason: "unsupported_high_risk" };
       }
 
-      if (rules.has(ruleKey(request))) {
+      if (request.risk === "low" && rules.has(ruleKey(request))) {
         return { allowed: true, reason: "remembered" };
       }
 
       return { allowed: false, reason: "confirmation_required" };
     },
 
-    // 记住一个非高风险能力请求.
+    // 只记住低风险能力请求, 中高风险动作每次都需要确认.
     remember(request: CapabilityRequest) {
-      if (request.risk === "high") return;
+      if (request.risk !== "low") return;
       rules.set(ruleKey(request), request);
     },
 

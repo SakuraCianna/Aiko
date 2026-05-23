@@ -4,11 +4,11 @@ export function SettingsPanel() {
     <section className="panel-content">
       <label>
         GLM 模型
-        <input value="glm-4v-flash" readOnly />
+        <input value="glm-4.6v-flash" readOnly />
       </label>
       <label>
         语音输入
-        <input value="语音理解 provider 预留,暂不接入真实 ASR" readOnly />
+        <input value="实时语音识别优先,不支持时退回录音附件" readOnly />
       </label>
     </section>
   );

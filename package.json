@@ -31,10 +31,21 @@
     "@types/react-dom": "^19.0.2",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^35.0.0",
+    "electron": "^42.2.0",
     "electron-vite": "^2.3.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"
+  },
+  "overrides": {
+    "@langchain/langgraph": {
+      "uuid": "^11.1.1"
+    },
+    "@langchain/langgraph-checkpoint": {
+      "uuid": "^11.1.1"
+    },
+    "@langchain/langgraph-sdk": {
+      "uuid": "^13.0.2"
+    }
   }
 }

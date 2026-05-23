@@ -6,6 +6,8 @@ export type CapabilityName =
   | "open_configured_path"
   | "create_reminder"
   | "cancel_reminder"
+  | "set_default_application"
+  | "write_desktop_markdown"
   | "shell_command";
 
 export type CapabilityRequest = {

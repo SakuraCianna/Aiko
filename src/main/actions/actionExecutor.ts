@@ -43,109 +43,11 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     ): Promise<ExecuteActionResponse> {
       const { action, remember } = request;
 
-      if (action.risk === "high") {
-        return { ok: false, message: describeActionFailure(action, "high_risk") };
+      try {
+        return await executeSafely(action, remember);
+      } catch {
+        return { ok: false, message: describeActionFailure(action, "execution_failed") };
       }
-
-      if (action.capability === "open_url") {
-        await deps.openUrl(action.target);
-        rememberSuccessfulPermission(action, remember);
-        return { ok: true, message: describeActionSuccess(action) };
-      }
-
-      if (action.capability === "open_application") {
-        const opened = await deps.openApplication(action.target);
-        if (opened) {
-          rememberSuccessfulPermission(action, remember);
-          rememberDefaultApplication(action, remember);
-        }
-        const defaultFor = readStringParam(action.params, "defaultFor");
-        if (opened && remember && defaultFor) {
-          return {
-            ok: true,
-            message: `${action.target} 已经打开, 也设成默认${defaultFor}. 以后要改的话, 对我说"将默认${defaultFor}改成 XXX".`
-          };
-        }
-        return opened
-          ? { ok: true, message: describeActionSuccess(action) }
-          : { ok: false, message: describeActionFailure(action, "not_found") };
-      }
-
-      if (action.capability === "set_default_application") {
-        const defaultFor = readStringParam(action.params, "defaultFor") || action.target;
-        const application = readStringParam(action.params, "application");
-        if (!deps.applicationPreferenceRepository || !application) {
-          return { ok: false, message: describeActionFailure(action, "invalid") };
-        }
-
-        deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, application);
-        rememberSuccessfulPermission(action, remember);
-        return {
-          ok: true,
-          message: `默认${defaultFor}已改成 ${application}. 下次你说"打开${defaultFor}", 我就按这个来.`
-        };
-      }
-
-      if (action.capability === "create_reminder") {
-        const amount = readNumberParam(action.params, "amount");
-        const unit = action.params?.unit;
-        const title = readStringParam(action.params, "title") || action.target;
-
-        // 提醒参数来自模型侧 payload, 保存前必须重新校验.
-        if (!amount || (unit !== "minutes" && unit !== "hours")) {
-          return { ok: false, message: describeActionFailure(action, "invalid") };
-        }
-
-        const reminder = createRelativeReminder({
-          title,
-          amount,
-          unit,
-          baseTime: deps.now(),
-        });
-        if (deps.reminderRepository) {
-          deps.reminderRepository.save(reminder);
-        } else {
-          reminders.push(reminder);
-        }
-        rememberSuccessfulPermission(action, remember);
-        return { ok: true, message: describeActionSuccess(action) };
-      }
-
-      if (action.capability === "cancel_reminder") {
-        const target = readStringParam(action.params, "target") || action.target;
-        if (target !== "latest") {
-          return { ok: false, message: describeActionFailure(action, "invalid") };
-        }
-
-        const reminder = deps.reminderRepository
-          ? deps.reminderRepository.cancelLatestActive()
-          : cancelLatestActiveReminder(reminders);
-        if (!reminder) {
-          return { ok: false, message: "现在没有正在等待的提醒可以取消. 我先不乱删." };
-        }
-
-        rememberSuccessfulPermission(action, remember);
-        return {
-          ok: true,
-          message: `已取消提醒: ${reminder.title}. 我把这条从待办里收起来了.`
-        };
-      }
-
-      if (action.capability === "write_desktop_markdown") {
-        const title = readStringParam(action.params, "title") || "Aiko回答";
-        const content = readStringParam(action.params, "content");
-
-        // 写文件必须有注入的本地 writer 和非空正文, 避免模型构造空文件.
-        if (!deps.writeDesktopMarkdown || !content) {
-          return { ok: false, message: describeActionFailure(action, "invalid") };
-        }
-
-        const result = await deps.writeDesktopMarkdown({ title, content });
-        rememberSuccessfulPermission(action, remember);
-        return { ok: true, message: `我把 Markdown 写好了: ${result.filePath}` };
-      }
-
-      return { ok: false, message: describeActionFailure(action, "unsupported") };
     },
 
     // 列出当前执行器可见的提醒.
@@ -174,12 +76,122 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     },
   };
 
+  // 在统一错误边界内执行动作, 保证 IPC 总能拿到结构化结果.
+  async function executeSafely(
+    action: ExecuteActionRequest["action"],
+    remember: boolean,
+  ): Promise<ExecuteActionResponse> {
+    if (action.risk === "high") {
+      return { ok: false, message: describeActionFailure(action, "high_risk") };
+    }
+
+    if (action.capability === "open_url") {
+      await deps.openUrl(action.target);
+      rememberSuccessfulPermission(action, remember);
+      return { ok: true, message: describeActionSuccess(action) };
+    }
+
+    if (action.capability === "open_application") {
+      const opened = await deps.openApplication(action.target);
+      if (opened) {
+        rememberSuccessfulPermission(action, remember);
+        rememberDefaultApplication(action, remember);
+      }
+      const defaultFor = readStringParam(action.params, "defaultFor");
+      if (opened && remember && defaultFor) {
+        return {
+          ok: true,
+          message: `${action.target} 已经打开, 也设成默认${defaultFor}. 以后要改的话, 对我说"将默认${defaultFor}改成 XXX".`
+        };
+      }
+      return opened
+        ? { ok: true, message: describeActionSuccess(action) }
+        : { ok: false, message: describeActionFailure(action, "not_found") };
+    }
+
+    if (action.capability === "set_default_application") {
+      const defaultFor = readStringParam(action.params, "defaultFor") || action.target;
+      const application = readStringParam(action.params, "application");
+      if (!deps.applicationPreferenceRepository || !application) {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+
+      deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, application);
+      rememberSuccessfulPermission(action, remember);
+      return {
+        ok: true,
+        message: `默认${defaultFor}已改成 ${application}. 下次你说"打开${defaultFor}", 我就按这个来.`
+      };
+    }
+
+    if (action.capability === "create_reminder") {
+      const amount = readNumberParam(action.params, "amount");
+      const unit = action.params?.unit;
+      const title = readStringParam(action.params, "title") || action.target;
+
+      // 提醒参数来自模型侧 payload, 保存前必须重新校验.
+      if (!amount || (unit !== "minutes" && unit !== "hours")) {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+
+      const reminder = createRelativeReminder({
+        title,
+        amount,
+        unit,
+        baseTime: deps.now(),
+      });
+      if (deps.reminderRepository) {
+        deps.reminderRepository.save(reminder);
+      } else {
+        reminders.push(reminder);
+      }
+      rememberSuccessfulPermission(action, remember);
+      return { ok: true, message: describeActionSuccess(action) };
+    }
+
+    if (action.capability === "cancel_reminder") {
+      const target = readStringParam(action.params, "target") || action.target;
+      if (target !== "latest") {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+
+      const reminder = deps.reminderRepository
+        ? deps.reminderRepository.cancelLatestActive()
+        : cancelLatestActiveReminder(reminders);
+      if (!reminder) {
+        return { ok: false, message: "现在没有正在等待的提醒可以取消. 我先不乱删." };
+      }
+
+      rememberSuccessfulPermission(action, remember);
+      return {
+        ok: true,
+        message: `已取消提醒: ${reminder.title}. 我把这条从待办里收起来了.`
+      };
+    }
+
+    if (action.capability === "write_desktop_markdown") {
+      const title = readStringParam(action.params, "title") || "Aiko回答";
+      const content = readStringParam(action.params, "content");
+
+      // 写文件必须有注入的本地 writer 和非空正文, 避免模型构造空文件.
+      if (!deps.writeDesktopMarkdown || !content) {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+
+      const result = await deps.writeDesktopMarkdown({ title, content });
+      rememberSuccessfulPermission(action, remember);
+      return { ok: true, message: `我把 Markdown 写好了: ${result.filePath}` };
+    }
+
+    return { ok: false, message: describeActionFailure(action, "unsupported") };
+  }
+
   // 执行成功后才记住权限, 避免失败动作污染自动授权规则.
   function rememberSuccessfulPermission(
     action: ExecuteActionRequest["action"],
     remember: boolean,
   ) {
-    if (!remember) return;
+    if (!remember || !canRememberAction(action)) return;
     const rule = toPermissionRule(action);
     // 记住权限时只绑定能力和目标, 不扩大到任意未来动作.
     if (deps.permissionRepository) {
@@ -199,6 +211,11 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     if (!defaultFor) return;
     deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, action.target);
   }
+}
+
+// 只有可重复, 低风险, 目标稳定的动作能被长期自动授权.
+function canRememberAction(action: ExecuteActionRequest["action"]): boolean {
+  return action.risk === "low" && (action.capability === "open_application" || action.capability === "open_url");
 }
 
 // 从本地内存提醒中取消最近创建的激活提醒.

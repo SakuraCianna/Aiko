@@ -204,8 +204,12 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
         return createApplicationChoiceResponse(decision.message, action, decision.actions);
       }
 
-      const result = await actionExecutor.execute({ action: decision.action, remember: false });
-      return { message: result.message };
+      if (actionExecutor.isRememberedAction(decision.action)) {
+        const result = await actionExecutor.execute({ action: decision.action, remember: false });
+        return { message: result.message };
+      }
+
+      return { message, pendingAction: storePendingAction(decision.action) };
     }
 
     if (actionExecutor.isRememberedAction(action)) {

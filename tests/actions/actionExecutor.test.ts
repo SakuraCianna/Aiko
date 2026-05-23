@@ -242,6 +242,33 @@ describe("createActionExecutor", () => {
     expect(remembered).toEqual([]);
   });
 
+  it("returns a structured failure when an injected capability throws", async () => {
+    const remembered: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => {
+        throw new Error("system refused");
+      },
+      openApplication: async () => false,
+      now: () => new Date("2026-05-19T10:00:00.000Z"),
+      permissionRepository: {
+        remember: (rule) => remembered.push(`${rule.capability}:${rule.target.toLowerCase()}`),
+        has: () => false,
+        list: () => []
+      }
+    });
+
+    const result = await executor.execute({
+      action: lowRiskAction("open_url", "https://example.com"),
+      remember: true
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message: "这个动作执行时卡住了. 我先不假装完成, 你可以再试一次."
+    });
+    expect(remembered).toEqual([]);
+  });
+
   it("sets a default app preference when a chosen app is remembered as default", async () => {
     const opened: string[] = [];
     const defaults: string[] = [];
@@ -270,6 +297,46 @@ describe("createActionExecutor", () => {
     expect(defaults).toEqual(["浏览器:Google Chrome"]);
     expect(result.message).toContain("默认浏览器");
     expect(result.message).toContain("将默认浏览器改成");
+  });
+
+  it("only stores durable permissions for explicitly auto-allowable actions", async () => {
+    const remembered: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      writeDesktopMarkdown: async () => ({ filePath: "C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\a.md" }),
+      now: () => new Date("2026-05-19T10:00:00.000Z"),
+      permissionRepository: {
+        remember: (rule) => remembered.push(`${rule.capability}:${rule.target.toLowerCase()}`),
+        has: () => false,
+        list: () => []
+      }
+    });
+
+    await executor.execute({
+      action: {
+        title: "写入 Aiko回答.md",
+        source: "长文",
+        risk: "medium",
+        capability: "write_desktop_markdown",
+        target: "Desktop/Aiko",
+        params: {
+          title: "Aiko回答",
+          content: "# 正文"
+        }
+      },
+      remember: true
+    });
+    await executor.execute({
+      action: {
+        ...lowRiskAction("cancel_reminder", "latest"),
+        title: "取消最近提醒",
+        params: { target: "latest" }
+      },
+      remember: true
+    });
+
+    expect(remembered).toEqual([]);
   });
 });
 

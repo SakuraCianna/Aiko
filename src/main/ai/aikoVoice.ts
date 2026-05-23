@@ -71,9 +71,16 @@ export function describeActionSuccess(action: PendingActionDto): string {
 }
 
 // 描述本地执行失败后的 Aiko 风格反馈.
-export function describeActionFailure(action: PendingActionDto, reason: "unsupported" | "not_found" | "invalid" | "high_risk") {
+export function describeActionFailure(
+  action: PendingActionDto,
+  reason: "unsupported" | "not_found" | "invalid" | "high_risk" | "execution_failed"
+) {
   if (reason === "high_risk") {
     return "这个动作风险偏高, 我先不碰. 稳一点比较好.";
+  }
+
+  if (reason === "execution_failed") {
+    return "这个动作执行时卡住了. 我先不假装完成, 你可以再试一次.";
   }
 
   if (reason === "not_found") {

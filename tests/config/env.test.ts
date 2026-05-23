@@ -5,12 +5,12 @@ describe("parseEnv", () => {
   it("returns GLM config when required values are present", () => {
     const config = parseEnv({
       GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
-      GLM_MODEL: "glm-4v-flash",
+      GLM_MODEL: "glm-4.6v-flash",
       GLM_API_KEY: "secret-value"
     });
 
     expect(config.glm.baseUrl).toBe("https://open.bigmodel.cn/api/paas/v4");
-    expect(config.glm.model).toBe("glm-4v-flash");
+    expect(config.glm.model).toBe("glm-4.6v-flash");
     expect(config.glm.apiKey).toBe("secret-value");
   });
 

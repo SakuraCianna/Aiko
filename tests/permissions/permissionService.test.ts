@@ -27,4 +27,24 @@ describe("permissionService", () => {
       reason: "unsupported_high_risk"
     });
   });
+
+  it("does not remember medium-risk actions", () => {
+    const service = createPermissionService([]);
+
+    service.remember({ capability: "write_desktop_markdown", target: "Desktop/Aiko", risk: "medium" });
+
+    expect(service.list()).toEqual([]);
+    expect(service.canExecute({ capability: "write_desktop_markdown", target: "Desktop/Aiko", risk: "medium" })).toEqual({
+      allowed: false,
+      reason: "confirmation_required"
+    });
+  });
+
+  it("ignores medium-risk initial rules", () => {
+    const service = createPermissionService([
+      { capability: "write_desktop_markdown", target: "Desktop/Aiko", risk: "medium" }
+    ]);
+
+    expect(service.list()).toEqual([]);
+  });
 });

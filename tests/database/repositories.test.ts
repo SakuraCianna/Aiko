@@ -45,6 +45,22 @@ describe("database repositories", () => {
     db.close();
   });
 
+  it("does not persist medium-risk permission rules", () => {
+    const db = createMemoryDatabase();
+    const repository = createPermissionRepository(db);
+
+    repository.remember({
+      capability: "write_desktop_markdown",
+      target: "Desktop/Aiko",
+      risk: "medium"
+    });
+
+    expect(repository.list()).toEqual([]);
+    expect(repository.has({ capability: "write_desktop_markdown", target: "Desktop/Aiko" })).toBe(false);
+
+    db.close();
+  });
+
   it("persists default application preferences in settings", () => {
     const db = createMemoryDatabase();
     const repository = createApplicationPreferenceRepository(db);
