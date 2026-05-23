@@ -21,6 +21,10 @@ export function describePendingAction(action: PendingActionDto): string {
     return `提醒我可以记好: ${amount} ${unit}后, ${title}. 确认一下就行.`;
   }
 
+  if (action.capability === "cancel_reminder") {
+    return "我可以取消最近一条还没触发的提醒. 先确认一下, 我再动手.";
+  }
+
   if (action.capability === "set_default_application") {
     const defaultFor = typeof action.params?.defaultFor === "string" ? action.params.defaultFor : action.target;
     const application = typeof action.params?.application === "string" ? action.params.application : "这个应用";
@@ -47,6 +51,10 @@ export function describeActionSuccess(action: PendingActionDto): string {
   if (action.capability === "create_reminder") {
     const title = typeof action.params?.title === "string" ? action.params.title : action.target;
     return `提醒已记好: ${title}. 到点我会把它拎出来.`;
+  }
+
+  if (action.capability === "cancel_reminder") {
+    return "最近一条待触发提醒已取消. 我把这件事从清单里拿掉了.";
   }
 
   if (action.capability === "set_default_application") {

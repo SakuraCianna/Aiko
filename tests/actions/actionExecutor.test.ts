@@ -46,6 +46,7 @@ describe("createActionExecutor", () => {
       {
         title: "喝水",
         triggerAt: "2026-05-19T10:30:00.000Z",
+        createdAt: "2026-05-19T10:00:00.000Z",
         status: "active"
       }
     ]);
@@ -74,7 +75,44 @@ describe("createActionExecutor", () => {
       {
         title: "喝水",
         triggerAt: "2026-05-19T12:00:00.000Z",
+        createdAt: "2026-05-19T10:00:00.000Z",
         status: "active"
+      }
+    ]);
+  });
+
+  it("cancels the latest active reminder through the local reminder store", async () => {
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      now: () => new Date("2026-05-19T10:00:00.000Z")
+    });
+
+    await executor.execute({
+      action: {
+        ...lowRiskAction("create_reminder", "喝水"),
+        params: { amount: 30, unit: "minutes", title: "喝水" }
+      },
+      remember: false
+    });
+
+    const result = await executor.execute({
+      action: {
+        ...lowRiskAction("cancel_reminder", "latest"),
+        title: "取消最近提醒",
+        params: { target: "latest" }
+      },
+      remember: false
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      message: "已取消提醒: 喝水. 我把这条从待办里收起来了."
+    });
+    expect(executor.listReminders()).toMatchObject([
+      {
+        title: "喝水",
+        status: "cancelled"
       }
     ]);
   });
@@ -155,9 +193,11 @@ describe("createActionExecutor", () => {
             id: "reminder_saved",
             title: "喝水",
             triggerAt: "2026-05-19T10:30:00.000Z",
+            createdAt: "2026-05-19T10:00:00.000Z",
             status: "active"
           }
-        ]
+        ],
+        cancelLatestActive: () => null
       }
     });
 

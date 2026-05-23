@@ -86,6 +86,25 @@ describe("createAikoPlanner", () => {
     });
   });
 
+  it("plans cancellation of the latest active reminder", async () => {
+    const planner = createAikoPlanner();
+
+    const plan = await planner.plan({
+      userText: "取消刚才那个提醒",
+      userTranscript: "取消刚才那个提醒",
+      toolHints: []
+    });
+
+    expect(plan.steps[0]?.action).toMatchObject({
+      title: "取消最近提醒",
+      capability: "cancel_reminder",
+      target: "latest",
+      params: {
+        target: "latest"
+      }
+    });
+  });
+
   it("plans deterministic default app preference changes", async () => {
     const planner = createAikoPlanner();
 

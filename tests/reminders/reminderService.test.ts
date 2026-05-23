@@ -12,6 +12,7 @@ describe("createRelativeReminder", () => {
 
     expect(reminder.title).toBe("喝水");
     expect(reminder.triggerAt).toBe("2026-05-19T10:30:00.000Z");
+    expect(reminder.createdAt).toBe("2026-05-19T10:00:00.000Z");
     expect(reminder.status).toBe("active");
   });
 });

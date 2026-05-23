@@ -105,7 +105,9 @@ button {
 .command-input button,
 .dialog-actions button,
 .choice-actions button,
-.panel-tabs button {
+.panel-tabs button,
+.reminder-toolbar button,
+.reminder-card-actions button {
   border: 1px solid rgba(73, 101, 126, 0.22);
   background: rgba(255, 255, 255, 0.86);
   color: #26394b;
@@ -114,6 +116,17 @@ button {
   padding: 0 12px;
   display: inline-grid;
   place-items: center;
+}
+
+.command-input button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.command-input button svg {
+  width: 18px;
+  height: 18px;
 }
 
 .command-input .recording-button {
@@ -240,19 +253,19 @@ button {
 
 .command-shell {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .command-input {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 7px 8px;
   border: 1px solid rgba(73, 101, 126, 0.2);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(12px);
-  box-shadow: 0 12px 36px rgba(38, 54, 72, 0.16);
+  box-shadow: 0 10px 28px rgba(38, 54, 72, 0.14);
   -webkit-app-region: no-drag;
 }
 
@@ -266,6 +279,7 @@ button {
   outline: none;
   background: transparent;
   color: #24313f;
+  font-size: 14px;
 }
 
 .attachment-strip {
@@ -432,6 +446,109 @@ button {
 
 .memory-panel {
   align-content: start;
+}
+
+.reminder-panel {
+  align-content: start;
+}
+
+.reminder-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.reminder-toolbar h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.reminder-toolbar button,
+.reminder-card-actions button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.reminder-toolbar svg,
+.reminder-card-actions svg {
+  width: 18px;
+  height: 18px;
+}
+
+.reminder-list {
+  display: grid;
+  gap: 10px;
+}
+
+.reminder-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.96);
+}
+
+.reminder-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.reminder-main span {
+  color: #667789;
+  font-size: 12px;
+}
+
+.reminder-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.reminder-title-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reminder-status {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #375064;
+  background: rgba(231, 241, 246, 0.9);
+}
+
+.status-active {
+  color: #27614b;
+  background: rgba(226, 244, 235, 0.92);
+}
+
+.status-paused {
+  color: #6f5a1d;
+  background: rgba(252, 243, 215, 0.95);
+}
+
+.status-completed {
+  color: #51606d;
+  background: rgba(232, 238, 242, 0.95);
+}
+
+.status-cancelled {
+  color: #8a3f4d;
+  background: rgba(252, 230, 234, 0.95);
+}
+
+.reminder-card-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
 }
 
 .conversation-panel {

@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { recallMemories, type RecalledMemory } from "../memory/memoryRecall";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
-import type { Reminder } from "../reminders/reminderService";
+import type { Reminder, ReminderStatus } from "../reminders/reminderService";
 
 // 返回当前时间的 ISO 字符串.
 export function nowIso() {
@@ -327,7 +327,15 @@ export function createApplicationPreferenceRepository(db: DatabaseSync) {
   };
 }
 
-// 创建提醒仓储, 负责保存和列出提醒.
+type ReminderRow = {
+  id: string;
+  title: string;
+  trigger_at: string;
+  status: ReminderStatus;
+  created_at: string;
+};
+
+// 创建提醒仓储, 负责保存, 更新和列出提醒.
 export function createReminderRepository(db: DatabaseSync) {
   return {
     // 保存或更新一个提醒.
@@ -349,7 +357,7 @@ export function createReminderRepository(db: DatabaseSync) {
           trigger_at = excluded.trigger_at,
           status = excluded.status
       `
-      ).run(reminder.id, reminder.title, reminder.triggerAt, reminder.status, nowIso());
+      ).run(reminder.id, reminder.title, reminder.triggerAt, reminder.status, reminder.createdAt);
     },
 
     // 按触发时间列出提醒.
@@ -357,20 +365,60 @@ export function createReminderRepository(db: DatabaseSync) {
       const rows = db
         .prepare(
           `
-          SELECT id, title, trigger_at, status
+          SELECT id, title, trigger_at, status, created_at
           FROM reminders
           ORDER BY trigger_at ASC, created_at ASC
         `
         )
-        .all() as Array<{ id: string; title: string; trigger_at: string; status: Reminder["status"] }>;
+        .all() as ReminderRow[];
 
-      return rows.map((row) => ({
-        id: row.id,
-        title: row.title,
-        triggerAt: row.trigger_at,
-        status: row.status
-      }));
+      return rows.map(mapReminderRow);
+    },
+
+    // 更新提醒状态, 供面板完成, 暂停或取消提醒.
+    updateStatus(reminderId: string, status: ReminderStatus) {
+      const result = db.prepare("UPDATE reminders SET status = ? WHERE id = ?").run(status, reminderId);
+      return result.changes > 0;
+    },
+
+    // 删除一条提醒.
+    delete(reminderId: string) {
+      const result = db.prepare("DELETE FROM reminders WHERE id = ?").run(reminderId);
+      return result.changes > 0;
+    },
+
+    // 取消最近创建的激活提醒, 用于自然语言"取消刚才那个提醒".
+    cancelLatestActive(): Reminder | null {
+      const row = db
+        .prepare(
+          `
+          SELECT id, title, trigger_at, status, created_at
+          FROM reminders
+          WHERE status = 'active'
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT 1
+        `
+        )
+        .get() as ReminderRow | undefined;
+      if (!row) return null;
+
+      db.prepare("UPDATE reminders SET status = ? WHERE id = ?").run("cancelled", row.id);
+      return mapReminderRow({
+        ...row,
+        status: "cancelled"
+      });
     }
+  };
+}
+
+// 把提醒数据库行转换为业务对象.
+function mapReminderRow(row: ReminderRow): Reminder {
+  return {
+    id: row.id,
+    title: row.title,
+    triggerAt: row.trigger_at,
+    createdAt: row.created_at,
+    status: row.status
   };
 }
 

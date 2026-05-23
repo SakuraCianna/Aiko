@@ -32,7 +32,13 @@ const api: AikoApi = {
   // 接受一条待确认记忆候选.
   acceptMemoryCandidate: (candidateId) => ipcRenderer.invoke("memory:accept-candidate", candidateId),
   // 拒绝一条待确认记忆候选.
-  rejectMemoryCandidate: (candidateId) => ipcRenderer.invoke("memory:reject-candidate", candidateId)
+  rejectMemoryCandidate: (candidateId) => ipcRenderer.invoke("memory:reject-candidate", candidateId),
+  // 读取本地提醒列表.
+  listReminders: () => ipcRenderer.invoke("reminder:list"),
+  // 更新提醒状态.
+  updateReminderStatus: (reminderId, status) => ipcRenderer.invoke("reminder:update-status", reminderId, status),
+  // 删除一条本地提醒.
+  deleteReminder: (reminderId) => ipcRenderer.invoke("reminder:delete", reminderId)
 };
 
 contextBridge.exposeInMainWorld("aiko", api);

@@ -14,6 +14,16 @@ describe("renderer layout CSS", () => {
     expect(styles).toContain("bottom: 12px");
   });
 
+  it("keeps the command input compact for the pet window", () => {
+    expect(styles).toMatch(/\.command-input\s*\{[\s\S]*gap:\s*6px;/);
+    expect(styles).toMatch(/\.command-input\s*\{[\s\S]*padding:\s*7px 8px;/);
+    expect(styles).toMatch(/\.command-input\s*\{[\s\S]*border-radius:\s*8px;/);
+    expect(styles).toMatch(/\.command-input input\s*\{[\s\S]*font-size:\s*14px;/);
+    expect(styles).toMatch(/\.command-input button\s*\{[\s\S]*width:\s*34px;/);
+    expect(styles).toMatch(/\.command-input button\s*\{[\s\S]*min-height:\s*34px;/);
+    expect(styles).toMatch(/\.command-input button svg\s*\{[\s\S]*width:\s*18px;/);
+  });
+
   it("reveals command controls from explicit renderer state or input focus", () => {
     expect(styles).not.toContain(".pet-interaction-zone:hover .hover-controls");
     expect(styles).not.toContain(":has(.character-stage:hover) .hover-controls");

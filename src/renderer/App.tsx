@@ -231,7 +231,7 @@ export function App() {
           <div onMouseDown={(event) => event.stopPropagation()}>
             <PanelShell activePanel={activePanel} onPanelChange={setActivePanel}>
               {activePanel === "chat" && <ChatPanel />}
-              {activePanel === "reminders" && <ReminderPanel />}
+              {activePanel === "reminders" && <ReminderPanel onStatus={setMessage} />}
               {activePanel === "memory" && <MemoryPanel onStatus={setMessage} />}
               {activePanel === "settings" && <SettingsPanel />}
             </PanelShell>

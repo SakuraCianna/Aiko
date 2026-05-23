@@ -277,9 +277,27 @@ function createDefaultAgentFactory(config: AppConfig, registry = createDefaultTo
 // 判断用户是否明确要求开启新对话或清空当前上下文.
 export function isConversationResetRequest(payload: ChatPayload): boolean {
   if (payload.attachments.length > 0) return false;
-  const text = payload.text.trim().replace(/[。.!！?？]+$/, "");
-  return /^(?:请|麻烦)?(?:你)?(?:帮我)?(?:清空|删除|重置|忘掉)(?:当前|现在|本轮)?(?:对话|上下文|聊天记录)$/.test(text)
-    || /^(?:请|麻烦)?(?:你)?(?:帮我)?(?:开启|开始|新建|开)(?:一个|一段)?新对话$/.test(text);
+  const text = normalizeConversationResetText(payload.text);
+  if (!text || /(?:总结|回顾|整理|复盘|保存|导出).{0,8}(?:刚才|前面|之前|当前)?(?:聊天|对话|上下文)/.test(text)) {
+    return false;
+  }
+
+  return (
+    /(?:清空|删除|重置|忘掉|忘记).{0,8}(?:当前|现在|本轮|刚才|之前|前面)?(?:对话|上下文|聊天记录|聊天)/.test(text)
+    || /(?:开启|开始|新建|开)(?:一个|一段|个|段)?新的?(?:对话|聊天|话题)/.test(text)
+    || /^(?:我们)?(?:重新开始|从头开始|重开)(?:聊|聊天|对话)?$/.test(text)
+    || /(?:重新开始|从头开始|另起|重开).{0,8}(?:聊|聊天|对话|话题)/.test(text)
+    || /(?:换个|换一个|换段|换一段)新的?(?:话题|聊天|对话)/.test(text)
+  );
+}
+
+// 归一化新会话意图文本, 去掉语气词和标点以提高自然表达命中率.
+function normalizeConversationResetText(input: string): string {
+  return input
+    .trim()
+    .replace(/[。.!！?？，,、；;：:\s]+/g, "")
+    .replace(/^(?:请|麻烦|拜托)?(?:你)?(?:帮我)?/, "")
+    .replace(/(?:吧|呀|啦|呢|一下|可以吗|行吗)$/g, "");
 }
 
 // 格式化短期上下文, 让模型知道它不是长期记忆.
@@ -359,6 +377,7 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
   const openUrl = registry.get("open_url");
   const webSearch = registry.get("web_search");
   const createReminder = registry.get("create_reminder");
+  const cancelReminder = registry.get("cancel_reminder");
   const writeDesktopMarkdown = registry.get("write_desktop_markdown");
 
   return [
@@ -450,6 +469,30 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
           amount: z.number().int().positive().describe("提醒延迟数量"),
           unit: z.enum(["minutes", "hours"]).describe("延迟单位"),
           title: z.string().min(1).describe("提醒标题"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成取消最近提醒的待确认动作.
+    tool(
+      ({ target, source }) => {
+        proposedActions.push({
+          title: "取消最近提醒",
+          source: source || "取消最近提醒",
+          risk: "low",
+          capability: "cancel_reminder",
+          target,
+          params: {
+            target
+          }
+        });
+        return "已生成取消最近提醒的待确认动作.";
+      },
+      {
+        name: "propose_cancel_latest_reminder",
+        description: cancelReminder?.description ?? "提出取消最近一条待触发提醒的待确认动作.只生成动作,不执行.",
+        schema: z.object({
+          target: z.literal("latest").describe("只能取消最近一条仍然激活的提醒"),
           source: z.string().optional().describe("用户原始请求")
         })
       }

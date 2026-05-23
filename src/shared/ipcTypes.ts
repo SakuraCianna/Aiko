@@ -78,6 +78,20 @@ export type MemorySnapshotDto = {
   pendingCandidates: MemoryCandidateDto[];
 };
 
+export type ReminderStatusDto = "active" | "paused" | "completed" | "cancelled";
+
+export type ReminderItemDto = {
+  id: string;
+  title: string;
+  triggerAt: string;
+  createdAt: string;
+  status: ReminderStatusDto;
+};
+
+export type ReminderSnapshotDto = {
+  reminders: ReminderItemDto[];
+};
+
 export type ConversationMessageDto = {
   role: "user" | "assistant";
   content: string;
@@ -104,6 +118,9 @@ export type AikoApi = {
   listMemory: () => Promise<MemorySnapshotDto>;
   acceptMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
   rejectMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
+  listReminders: () => Promise<ReminderSnapshotDto>;
+  updateReminderStatus: (reminderId: string, status: ReminderStatusDto) => Promise<{ ok: boolean; message: string }>;
+  deleteReminder: (reminderId: string) => Promise<{ ok: boolean; message: string }>;
 };
 
 declare global {

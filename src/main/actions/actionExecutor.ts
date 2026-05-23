@@ -28,7 +28,7 @@ export type ActionExecutorDeps = {
     PermissionRepository,
     "remember" | "has" | "list"
   >;
-  reminderRepository?: Pick<ReminderRepository, "save" | "list">;
+  reminderRepository?: Pick<ReminderRepository, "save" | "list" | "cancelLatestActive">;
 };
 
 // 创建本地动作执行器, 负责把已确认的动作转成本地能力调用.
@@ -111,6 +111,26 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
         return { ok: true, message: describeActionSuccess(action) };
       }
 
+      if (action.capability === "cancel_reminder") {
+        const target = readStringParam(action.params, "target") || action.target;
+        if (target !== "latest") {
+          return { ok: false, message: describeActionFailure(action, "invalid") };
+        }
+
+        const reminder = deps.reminderRepository
+          ? deps.reminderRepository.cancelLatestActive()
+          : cancelLatestActiveReminder(reminders);
+        if (!reminder) {
+          return { ok: false, message: "现在没有正在等待的提醒可以取消. 我先不乱删." };
+        }
+
+        rememberSuccessfulPermission(action, remember);
+        return {
+          ok: true,
+          message: `已取消提醒: ${reminder.title}. 我把这条从待办里收起来了.`
+        };
+      }
+
       if (action.capability === "write_desktop_markdown") {
         const title = readStringParam(action.params, "title") || "Aiko回答";
         const content = readStringParam(action.params, "content");
@@ -179,6 +199,17 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     if (!defaultFor) return;
     deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, action.target);
   }
+}
+
+// 从本地内存提醒中取消最近创建的激活提醒.
+function cancelLatestActiveReminder(reminders: Reminder[]): Reminder | null {
+  const reminder = [...reminders]
+    .filter((candidate) => candidate.status === "active")
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0];
+  if (!reminder) return null;
+
+  reminder.status = "cancelled";
+  return { ...reminder };
 }
 
 // 把待执行动作转换成权限规则.

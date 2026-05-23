@@ -73,6 +73,9 @@ describe("createAikoRetriever", () => {
         name: "create_reminder"
       }),
       expect.objectContaining({
+        name: "cancel_reminder"
+      }),
+      expect.objectContaining({
         name: "write_desktop_markdown",
         capability: "write_desktop_markdown",
         risk: "medium",

@@ -66,12 +66,14 @@ describe("database repositories", () => {
       id: "reminder_later",
       title: "Later",
       triggerAt: "2026-05-19T10:30:00.000Z",
+      createdAt: "2026-05-19T10:01:00.000Z",
       status: "active"
     });
     repository.save({
       id: "reminder_soon",
       title: "Soon",
       triggerAt: "2026-05-19T10:05:00.000Z",
+      createdAt: "2026-05-19T10:00:00.000Z",
       status: "active"
     });
 
@@ -80,14 +82,62 @@ describe("database repositories", () => {
         id: "reminder_soon",
         title: "Soon",
         triggerAt: "2026-05-19T10:05:00.000Z",
+        createdAt: "2026-05-19T10:00:00.000Z",
         status: "active"
       },
       {
         id: "reminder_later",
         title: "Later",
         triggerAt: "2026-05-19T10:30:00.000Z",
+        createdAt: "2026-05-19T10:01:00.000Z",
         status: "active"
       }
+    ]);
+
+    db.close();
+  });
+
+  it("updates, deletes, and cancels the latest active reminder", () => {
+    const db = createMemoryDatabase();
+    const repository = createReminderRepository(db);
+
+    repository.save({
+      id: "reminder_first",
+      title: "First",
+      triggerAt: "2026-05-19T10:05:00.000Z",
+      createdAt: "2026-05-19T10:00:00.000Z",
+      status: "active"
+    });
+    repository.save({
+      id: "reminder_second",
+      title: "Second",
+      triggerAt: "2026-05-19T10:30:00.000Z",
+      createdAt: "2026-05-19T10:02:00.000Z",
+      status: "active"
+    });
+    repository.save({
+      id: "reminder_done",
+      title: "Done",
+      triggerAt: "2026-05-19T10:10:00.000Z",
+      createdAt: "2026-05-19T10:03:00.000Z",
+      status: "completed"
+    });
+
+    expect(repository.updateStatus("reminder_first", "completed")).toBe(true);
+    expect(repository.updateStatus("missing", "completed")).toBe(false);
+
+    expect(repository.cancelLatestActive()).toMatchObject({
+      id: "reminder_second",
+      title: "Second",
+      status: "cancelled"
+    });
+    expect(repository.cancelLatestActive()).toBeNull();
+
+    expect(repository.delete("reminder_done")).toBe(true);
+    expect(repository.delete("missing")).toBe(false);
+    expect(repository.list().map((reminder) => [reminder.id, reminder.status])).toEqual([
+      ["reminder_first", "completed"],
+      ["reminder_second", "cancelled"]
     ]);
 
     db.close();

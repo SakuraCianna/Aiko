@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AIKO_CHAT_TEMPERATURE, createAikoAgentRuntime, extractAssistantText } from "../../src/main/agent/aikoAgentRuntime";
+import {
+  AIKO_CHAT_TEMPERATURE,
+  createAikoAgentRuntime,
+  extractAssistantText,
+  isConversationResetRequest
+} from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
 import type { ChatPayload } from "../../src/shared/chatPayload";
@@ -304,6 +309,25 @@ describe("createAikoAgentRuntime", () => {
     expect(runtime.listConversation().messages).toEqual([]);
     expect(invokeCount).toBe(1);
     expect(recallCount).toBe(1);
+  });
+
+  it("detects natural requests to start a fresh conversation", () => {
+    const resetPhrases = [
+      "我们开始一段新的聊天吧",
+      "重新开始聊吧",
+      "换个新话题",
+      "这段先到这里, 我们开个新的对话",
+      "从头开始吧",
+      "忘掉刚才的聊天"
+    ];
+
+    for (const phrase of resetPhrases) {
+      expect(isConversationResetRequest(textPayload(phrase))).toBe(true);
+    }
+
+    expect(isConversationResetRequest(textPayload("帮我总结刚才的聊天"))).toBe(false);
+    expect(isConversationResetRequest(textPayload("重新开始这个计划"))).toBe(false);
+    expect(isConversationResetRequest({ text: "我们开始一段新的聊天吧", attachments: [audioAttachment()] })).toBe(false);
   });
 
   it("tells the model not to infer speech content when speech understanding fails", async () => {

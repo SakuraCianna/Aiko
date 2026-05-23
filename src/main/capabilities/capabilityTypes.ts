@@ -5,6 +5,7 @@ export type CapabilityName =
   | "open_url"
   | "open_configured_path"
   | "create_reminder"
+  | "cancel_reminder"
   | "shell_command";
 
 export type CapabilityRequest = {

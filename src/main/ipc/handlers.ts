@@ -13,7 +13,7 @@ import type {
   ReminderRepository
 } from "../database/repositories";
 import { validateChatPayload, type ChatPayload } from "../../shared/chatPayload";
-import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto } from "../../shared/ipcTypes";
+import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto, ReminderStatusDto } from "../../shared/ipcTypes";
 
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
@@ -21,7 +21,7 @@ export type AikoHandlerDeps = {
   panelWindow: BrowserWindow;
   memoryRepository?: Pick<MemoryRepository, "listMemories" | "listPendingCandidates" | "acceptCandidate" | "rejectCandidate">;
   permissionRepository?: Pick<PermissionRepository, "remember" | "has" | "list">;
-  reminderRepository?: Pick<ReminderRepository, "save" | "list">;
+  reminderRepository?: Pick<ReminderRepository, "save" | "list" | "updateStatus" | "delete" | "cancelLatestActive">;
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   applicationProvider?: () => ApplicationConfig[];
 };
@@ -160,6 +160,31 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     }
     const ok = deps.memoryRepository.rejectCandidate(candidateId);
     return ok ? { ok: true, message: "已忽略这条记忆." } : { ok: false, message: "记忆候选不存在." };
+  });
+
+  ipcMain.handle("reminder:list", () => {
+    return {
+      reminders: deps.reminderRepository?.list() ?? actionExecutor.listReminders()
+    };
+  });
+
+  ipcMain.handle("reminder:update-status", (_event, reminderId: unknown, status: unknown) => {
+    if (typeof reminderId !== "string" || !isReminderStatus(status) || !deps.reminderRepository) {
+      return { ok: false, message: "提醒不存在或状态无效." };
+    }
+
+    const ok = deps.reminderRepository.updateStatus(reminderId, status);
+    if (!ok) return { ok: false, message: "提醒不存在." };
+    return { ok: true, message: describeReminderStatusUpdate(status) };
+  });
+
+  ipcMain.handle("reminder:delete", (_event, reminderId: unknown) => {
+    if (typeof reminderId !== "string" || !deps.reminderRepository) {
+      return { ok: false, message: "提醒不存在." };
+    }
+
+    const ok = deps.reminderRepository.delete(reminderId);
+    return ok ? { ok: true, message: "提醒已删除." } : { ok: false, message: "提醒不存在." };
   });
 
   // 根据权限状态决定是直接执行动作还是返回待确认动作.
@@ -327,6 +352,12 @@ function isSupportedAction(action: PendingActionDto): boolean {
     );
   }
 
+  if (action.capability === "cancel_reminder") {
+    const params = action.params;
+    const target = typeof params?.target === "string" ? params.target : action.target;
+    return action.target === "latest" && target === "latest";
+  }
+
   if (action.capability === "set_default_application") {
     const params = action.params;
     return (
@@ -355,6 +386,19 @@ function isSupportedAction(action: PendingActionDto): boolean {
   }
 
   return false;
+}
+
+// 判断提醒状态是否属于前端可修改的安全范围.
+function isReminderStatus(value: unknown): value is ReminderStatusDto {
+  return value === "active" || value === "paused" || value === "completed" || value === "cancelled";
+}
+
+// 根据提醒状态生成面板操作反馈.
+function describeReminderStatusUpdate(status: ReminderStatusDto): string {
+  if (status === "active") return "提醒已恢复.";
+  if (status === "paused") return "提醒已暂停.";
+  if (status === "completed") return "提醒已标记完成.";
+  return "提醒已取消.";
 }
 
 // 比较确认时的动作是否和原始待确认动作完全一致.

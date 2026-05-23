@@ -78,6 +78,19 @@ export function detectDeterministicAction(input: string): DetectedAction | null 
     });
   }
 
+  if (isReminderCancelRequest(text)) {
+    return toDetectedAction({
+        title: "取消最近提醒",
+        source: text,
+        risk: "low",
+        capability: "cancel_reminder",
+        target: "latest",
+        params: {
+          target: "latest"
+        }
+    });
+  }
+
   const openUrlMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:打开|访问|开一下)\s*(https?:\/\/\S+)$/i);
   if (openUrlMatch?.[1]) {
     const url = openUrlMatch[1].trim();
@@ -149,6 +162,21 @@ export function detectDeterministicAction(input: string): DetectedAction | null 
   }
 
   return null;
+}
+
+// 判断用户是否想取消最近一条待触发提醒.
+function isReminderCancelRequest(input: string): boolean {
+  const text = input
+    .trim()
+    .replace(/[。.!！?？]+$/g, "")
+    .replace(/\s+/g, "");
+  if (!text.includes("提醒")) return false;
+
+  return (
+    /(?:取消|撤销|删除|移除|关掉).{0,8}(?:刚才|最近|上一个|上一条|那个|这条)?(?:的)?提醒/.test(text)
+    || /(?:刚才|最近|上一个|上一条|那个|这条).{0,8}提醒.{0,8}(?:取消|撤销|删除|移除|关掉)/.test(text)
+    || /不要(?:再)?提醒我了/.test(text)
+  );
 }
 
 // 把动作包装成带 Aiko 语气的检测结果.

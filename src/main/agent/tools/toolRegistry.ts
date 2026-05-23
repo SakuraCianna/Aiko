@@ -63,6 +63,18 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     planOnly: true
   },
   {
+    name: "cancel_reminder",
+    description: "提出取消最近一条待触发提醒的待确认动作.只生成动作,不执行.",
+    capability: "cancel_reminder",
+    risk: "low",
+    requiresConfirmation: true,
+    schema: {
+      target: "latest",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
     name: "write_desktop_markdown",
     description: "提出把长篇回复写入桌面 Aiko 文件夹 Markdown 文件的待确认动作.只生成动作,不执行.",
     capability: "write_desktop_markdown",

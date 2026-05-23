@@ -10,6 +10,7 @@ describe("createDefaultToolRegistry", () => {
       "open_url",
       "web_search",
       "create_reminder",
+      "cancel_reminder",
       "write_desktop_markdown",
       "recall_memory",
       "list_reminders"
@@ -57,6 +58,21 @@ describe("createDefaultToolRegistry", () => {
       capability: "list_reminders",
       risk: "low",
       requiresConfirmation: false,
+      planOnly: true
+    });
+  });
+
+  it("exposes reminder cancellation as a confirmed low-risk action", () => {
+    const registry = createDefaultToolRegistry();
+
+    expect(registry.get("cancel_reminder")).toMatchObject({
+      capability: "cancel_reminder",
+      risk: "low",
+      requiresConfirmation: true,
+      schema: {
+        target: "latest",
+        source: "string?"
+      },
       planOnly: true
     });
   });
