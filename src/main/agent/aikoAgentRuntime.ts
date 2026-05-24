@@ -20,8 +20,10 @@ import { classifyMemoryCandidate, extractMemoryCandidates } from "../memory/sile
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
 import {
+  createAikoActionApprovalWorkflow,
   createAikoAgentWorkflow,
   isAikoAgentWorkflowInterrupted,
+  type AikoActionApprovalWorkflow,
   type AikoAgentWorkflow,
   type AikoAgentWorkflowApprovalMode,
   type AikoPendingActionReviewDecision,
@@ -129,9 +131,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const planner = createAikoPlanner();
   const executor = createAikoExecutor();
   const traceRecorder = options.traceRecorder ?? createAikoTraceRecorder();
-  const approvalMode = options.approvalMode ?? "passive";
+  const approvalMode = options.approvalMode ?? "interrupt";
   const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
-  const approvalSessions = new Map<string, AikoAgentWorkflow>();
+  const approvalSessions = new Map<string, AikoAgentWorkflow | AikoActionApprovalWorkflow>();
   const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
   const memoryCandidateExtractor =
     options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
@@ -256,20 +258,22 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
       if (action) {
         const message = describeModelProposedAction(action);
+        const approvedAction = await preparePendingActionApproval(message, action);
         if (!assistantText) emitDelta(message);
         await rememberExchange(runtimeOptions, context.userTranscript, assistantText || message);
         trace.end({ mode: "tool_action" });
         rememberConversationTurn(context.userTranscript, assistantText || message);
-        return respondWithAction(message, action);
+        return respondWithAction(message, approvedAction);
       }
 
       const markdownAction = createDesktopMarkdownAction(context.userTranscript || context.userText, assistantText, prefersDesktopMarkdown);
       if (markdownAction) {
         const message = describePendingAction(markdownAction);
+        const approvedAction = await preparePendingActionApproval(message, markdownAction);
         await rememberExchange(runtimeOptions, context.userTranscript, assistantText);
         trace.end({ mode: "markdown_action" });
         rememberConversationTurn(context.userTranscript, message);
-        return respondWithAction(message, markdownAction);
+        return respondWithAction(message, approvedAction);
       }
 
       const message = assistantText || describeEmptyAssistantReply();
@@ -372,13 +376,34 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       return { ok: false, message: "This approval session has expired or was already resumed." };
     }
 
-    const result = await workflow.resume(decision, { threadId });
+    const resumeDecision = decision.type === "approve" ? { ...decision, action } : decision;
+    const result = await workflow.resume(resumeDecision, { threadId });
     if (isAikoAgentWorkflowInterrupted(result)) {
       return { ok: false, message: "This approval session still needs another decision." };
     }
 
     approvalSessions.delete(threadId);
     return { ok: true, message: "LangGraph approval resumed." };
+  }
+
+  // 为模型工具和后置生成的本地动作创建同样的 LangGraph interrupt 审批会话.
+  async function preparePendingActionApproval(message: string, action: PendingActionDto): Promise<PendingActionDto> {
+    if (approvalMode !== "interrupt") return action;
+
+    const threadId = approvalThreadIdFactory();
+    const workflow = createAikoActionApprovalWorkflow({
+      checkpointer: options.workflowCheckpointer
+    });
+    const payload: AikoPendingActionReviewPayload = {
+      kind: "pending_action_review",
+      message,
+      action
+    };
+    const result = await workflow.invoke(payload, { threadId });
+    if (!isAikoAgentWorkflowInterrupted(result)) return action;
+
+    approvalSessions.set(threadId, workflow);
+    return attachWorkflowApproval(action, threadId);
   }
 }
 

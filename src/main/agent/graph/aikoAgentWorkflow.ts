@@ -33,6 +33,7 @@ export type AikoPendingActionReviewPayload = {
 export type AikoPendingActionReviewDecision =
   | {
       type: "approve";
+      action?: PendingActionDto;
     }
   | {
       type: "reject";
@@ -79,6 +80,24 @@ export type AikoAgentWorkflow = {
 };
 
 // 创建 LangGraph Functional API 工作流, 作为 Aiko 请求生命周期的显式编排边界.
+export type AikoActionApprovalWorkflowResult = {
+  approval: AikoAgentWorkflowApproval;
+  stepNames: ["review"];
+};
+
+export type AikoActionApprovalWorkflowOutput = AikoActionApprovalWorkflowResult | AikoAgentWorkflowInterruptResult;
+
+export type AikoActionApprovalWorkflow = {
+  invoke: (
+    payload: AikoPendingActionReviewPayload,
+    options?: AikoAgentWorkflowInvokeOptions
+  ) => Promise<AikoActionApprovalWorkflowOutput>;
+  resume: (
+    decision: AikoPendingActionReviewDecision,
+    options: AikoAgentWorkflowInvokeOptions
+  ) => Promise<AikoActionApprovalWorkflowOutput>;
+};
+
 export function createAikoAgentWorkflow(deps: AikoAgentWorkflowDeps): AikoAgentWorkflow {
   const approvalMode = deps.approvalMode ?? "passive";
   const checkpointer = approvalMode === "interrupt" ? deps.checkpointer ?? new MemorySaver() : deps.checkpointer;
@@ -98,7 +117,7 @@ export function createAikoAgentWorkflow(deps: AikoAgentWorkflowDeps): AikoAgentW
     return createPendingActionReviewPayload(proposal);
   });
 
-  const workflow = entrypoint(createEntrypointOptions(checkpointer), async (payload: ChatPayload) => {
+  const workflow = entrypoint(createEntrypointOptions("aikoAgentWorkflow", checkpointer), async (payload: ChatPayload) => {
     const context = await retrieveContext(payload);
     const plan = await planRequest(context);
     const proposal = await prepareExecution(plan);
@@ -130,6 +149,39 @@ export function createAikoAgentWorkflow(deps: AikoAgentWorkflowDeps): AikoAgentW
 }
 
 // 判断 LangGraph 返回值是否是中断结果, 方便 runtime 保持兼容模式.
+// 创建只负责人审动作的轻量工作流, 用于模型工具或自动 Markdown 动作生成后的统一审批.
+export function createAikoActionApprovalWorkflow(options: {
+  checkpointer?: BaseCheckpointSaver;
+} = {}): AikoActionApprovalWorkflow {
+  const checkpointer = options.checkpointer ?? new MemorySaver();
+  const prepareReview = task("review", async (payload: AikoPendingActionReviewPayload) => {
+    return payload;
+  });
+  const workflow = entrypoint(createEntrypointOptions("aikoActionApprovalWorkflow", checkpointer), async (
+    payload: AikoPendingActionReviewPayload
+  ) => {
+    const reviewPayload = await prepareReview(payload);
+    return {
+      approval: reviewPendingAction(reviewPayload, "interrupt"),
+      stepNames: ["review"] as ["review"]
+    };
+  });
+
+  return {
+    // 暂停一个后置生成的本地动作, 与主请求 workflow 使用同样的 interrupt/resume 语义.
+    async invoke(payload, options) {
+      const result = await workflow.invoke(payload, createWorkflowConfig("interrupt", options));
+      return result as AikoActionApprovalWorkflowOutput;
+    },
+
+    // 恢复后置审批 workflow, approve/reject/respond 都通过同一条 LangGraph resume 通道进入.
+    async resume(decision, options) {
+      const result = await workflow.invoke(new Command({ resume: decision }), createWorkflowConfig("interrupt", options));
+      return result as AikoActionApprovalWorkflowOutput;
+    }
+  };
+}
+
 export function isAikoAgentWorkflowInterrupted(value: unknown): value is AikoAgentWorkflowInterruptResult {
   return Boolean(
     value &&
@@ -169,10 +221,10 @@ function reviewPendingAction(
 }
 
 // 根据是否启用 checkpointer 创建 entrypoint 配置.
-function createEntrypointOptions(checkpointer: BaseCheckpointSaver | undefined) {
-  if (!checkpointer) return "aikoAgentWorkflow";
+function createEntrypointOptions(name: string, checkpointer: BaseCheckpointSaver | undefined) {
+  if (!checkpointer) return name;
   return {
-    name: "aikoAgentWorkflow",
+    name,
     checkpointer
   };
 }

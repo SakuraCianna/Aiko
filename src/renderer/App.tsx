@@ -98,6 +98,7 @@ export function App() {
           capability: response.pendingAction.capability,
           target: response.pendingAction.target,
           params: response.pendingAction.params,
+          approval: response.pendingAction.approval,
           choices: response.pendingAction.choices
         });
       } else {
@@ -117,6 +118,7 @@ export function App() {
   // 中止当前流式回复, 同时停止 UI 增量, 主进程请求和语音播放.
   function cancelActiveResponse() {
     const requestId = activeStreamIdRef.current;
+    const actionToCancel = pendingAction;
     activeStreamIdRef.current = null;
     setPendingAction(null);
     speechControllerRef.current?.cancel();
@@ -131,6 +133,11 @@ export function App() {
       return;
     }
 
+    if (actionToCancel) {
+      void cancelPendingAction(actionToCancel);
+      return;
+    }
+
     const idleMessage = "现在没有正在输出的回复.";
     setMessage(idleMessage);
     setCharacterBehaviorNow("idle");
@@ -140,6 +147,8 @@ export function App() {
   // 新请求开始前安静取消旧请求, 避免旧模型流继续占用调用或留下过期动作.
   function cancelPreviousResponseBeforeNewRequest() {
     const previousRequestId = activeStreamIdRef.current;
+    const actionToCancel = pendingAction;
+    if (actionToCancel) void window.aiko.cancelAction({ action: actionToCancel, reason: "replaced_by_new_request" });
     if (!previousRequestId) return;
 
     activeStreamIdRef.current = null;
@@ -162,6 +171,20 @@ export function App() {
   }
 
   // 切换窗口点击穿透状态.
+  // 拒绝当前待确认动作, 通知主进程恢复 LangGraph 审批并清理会话.
+  async function cancelPendingAction(action: PendingActionDto | null = pendingAction) {
+    if (!action) return;
+    const result = await window.aiko.cancelAction({
+      action,
+      reason: "user_cancelled"
+    });
+    const cancelMessage = result.message || "已取消. 我先把手收回来.";
+    setMessage(cancelMessage);
+    speakAiko(cancelMessage, "idle", "failure", selectCancelMotion(false));
+    showControls();
+    setPendingAction(null);
+  }
+
   async function toggleClickThrough() {
     const next = !clickThrough;
     setClickThrough(next);
@@ -275,13 +298,7 @@ export function App() {
         onAlways={() => void executePendingAction(true)}
         onChoose={(action) => void executePendingAction(false, action)}
         onChooseDefault={(action) => void executePendingAction(true, action)}
-        onCancel={() => {
-          const cancelMessage = "已取消. 我先把手收回来.";
-          setMessage(cancelMessage);
-          speakAiko(cancelMessage, "idle", "failure", selectCancelMotion(false));
-          showControls();
-          setPendingAction(null);
-        }}
+        onCancel={() => void cancelPendingAction()}
       />
       {activePanel && (
         <div className="panel-backdrop" onMouseDown={() => setActivePanel(null)}>

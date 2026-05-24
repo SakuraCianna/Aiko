@@ -25,6 +25,8 @@ const api: AikoApi = {
   },
   // 确认并执行一个待确认动作.
   executeAction: (request) => ipcRenderer.invoke("action:execute", request),
+  // 拒绝一个待确认动作, 并恢复 LangGraph 审批会话.
+  cancelAction: (request) => ipcRenderer.invoke("action:cancel", request),
   // 读取当前短期对话上下文.
   listConversation: () => ipcRenderer.invoke("conversation:list"),
   // 清空当前短期对话上下文.

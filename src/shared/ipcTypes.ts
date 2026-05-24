@@ -35,6 +35,11 @@ export type ExecuteActionRequest = {
   remember: boolean;
 };
 
+export type CancelActionRequest = {
+  action: PendingActionDto;
+  reason?: string;
+};
+
 export type ExecuteActionResponse = {
   ok: boolean;
   message: string;
@@ -121,6 +126,7 @@ export type AikoApi = {
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
+  cancelAction: (request: CancelActionRequest) => Promise<ExecuteActionResponse>;
   listConversation: () => Promise<ConversationSnapshotDto>;
   resetConversation: () => Promise<ConversationSnapshotDto>;
   listMemory: () => Promise<MemorySnapshotDto>;

@@ -70,7 +70,7 @@
 - [x] Add tests for passive `pending_action_review` payloads.
 - [x] Add tests for LangGraph `interrupt` mode and `resume` decisions.
 - [x] Implement `approvalMode: "passive" | "interrupt"`.
-- [x] Keep runtime on passive mode so existing IPC confirmation behavior stays unchanged.
+- [x] Keep runtime on passive mode during the first migration step so existing IPC confirmation behavior stays unchanged.
 - [x] Document the migration boundary and the remaining resume integration step.
 
 ### Task 7: Connect Runtime Approval Resume To IPC Execution
@@ -85,3 +85,22 @@
 - [x] Attach an approval thread id to returned pending actions without changing renderer behavior.
 - [x] Resume LangGraph approval before local action execution, including remembered/auto-approved paths.
 - [x] Clear pending approval sessions when the current conversation is reset.
+
+### Task 8: Close The HITL Approval Loop
+
+**Files:**
+- Modify: `src/main/agent/aikoAgentRuntime.ts`
+- Modify: `src/main/ipc/handlers.ts`
+- Modify: `src/main/preload.ts`
+- Modify: `src/renderer/App.tsx`
+- Modify: `src/shared/ipcTypes.ts`
+- Test: `tests/agent/aikoAgentRuntime.test.ts`
+- Test: `tests/agent/agentArchitectureBoundary.test.ts`
+- Test: `tests/renderer/layoutCss.test.ts`
+
+- [x] Make runtime-level interrupt approval the default path.
+- [x] Add a lightweight LangGraph approval workflow for model-proposed actions and auto Markdown actions.
+- [x] Add `action:cancel` IPC and renderer `cancelAction` bridge.
+- [x] Resume approval with `reject` when the user cancels a pending action.
+- [x] Preserve `PendingActionDto.approval` through renderer state and choice actions.
+- [x] Remove sibling pending actions that share an approval thread after one choice is approved or rejected.

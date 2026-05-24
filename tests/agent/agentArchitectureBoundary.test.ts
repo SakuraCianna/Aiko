@@ -77,6 +77,14 @@ describe("Aiko agent architecture boundary", () => {
     expect(ipcHandlers).toContain("return actionExecutor.execute({ action, remember })");
   });
 
+  it("rejects workflow approval when a pending local action is cancelled", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("action:cancel");
+    expect(ipcHandlers).toContain("resumePendingActionApproval(pendingEntry.action, {");
+    expect(ipcHandlers).toContain("type: \"reject\"");
+  });
+
   it("documents that future agent work must extend the LangChain runtime", () => {
     const architectureDoc = join("docs", "agent-architecture.md");
 

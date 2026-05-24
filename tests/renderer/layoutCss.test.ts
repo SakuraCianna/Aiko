@@ -79,6 +79,17 @@ describe("renderer layout CSS", () => {
     expect(sharedTypes).toContain("cancelStream");
   });
 
+  it("rejects pending action approval when the confirmation dialog is cancelled", () => {
+    const app = readFileSync("src/renderer/App.tsx", "utf8");
+    const preload = readFileSync("src/main/preload.ts", "utf8");
+    const sharedTypes = readFileSync("src/shared/ipcTypes.ts", "utf8");
+
+    expect(app).toContain("approval: response.pendingAction.approval");
+    expect(app).toContain("cancelPendingAction");
+    expect(preload).toContain("action:cancel");
+    expect(sharedTypes).toContain("cancelAction");
+  });
+
   it("preserves pending action choices so generic app requests show selectable apps", () => {
     const app = readFileSync("src/renderer/App.tsx", "utf8");
     const dialog = readFileSync("src/renderer/components/ConfirmDialog.tsx", "utf8");

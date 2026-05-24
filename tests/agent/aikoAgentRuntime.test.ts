@@ -78,6 +78,7 @@ describe("createAikoAgentRuntime", () => {
   it("proposes low-risk application actions without calling the model", async () => {
     let invoked = false;
     const runtime = createAikoAgentRuntime({
+      approvalThreadIdFactory: () => "approval-default-action",
       agent: {
         async invoke() {
           invoked = true;
@@ -89,18 +90,22 @@ describe("createAikoAgentRuntime", () => {
     const response = await runtime.respond(textPayload("打开 VS Code"));
 
     expect(invoked).toBe(false);
-    expect(response.pendingAction).toEqual({
+    expect(response.pendingAction).toMatchObject({
       title: "打开应用:VS Code",
       source: "打开 VS Code",
       risk: "low",
       capability: "open_application",
-      target: "VS Code"
+      target: "VS Code",
+      approval: {
+        mode: "interrupt",
+        threadId: "approval-default-action",
+        status: "pending_action"
+      }
     });
   });
 
   it("can pause deterministic pending actions and resume their LangGraph approval", async () => {
     const runtime = createAikoAgentRuntime({
-      approvalMode: "interrupt",
       approvalThreadIdFactory: () => "approval-thread-1",
       agent: {
         async invoke() {
@@ -128,6 +133,59 @@ describe("createAikoAgentRuntime", () => {
     const duplicate = await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
 
     expect(duplicate.ok).toBe(false);
+  });
+
+  it("can reject a paused pending action approval", async () => {
+    const runtime = createAikoAgentRuntime({
+      approvalThreadIdFactory: () => "approval-reject-1",
+      agent: {
+        async invoke() {
+          throw new Error("deterministic action should not call the model");
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("https://example.com"));
+    const rejected = await runtime.resumePendingActionApproval(response.pendingAction!, {
+      type: "reject",
+      reason: "user_cancelled"
+    });
+
+    expect(rejected.ok).toBe(true);
+
+    const duplicate = await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
+
+    expect(duplicate.ok).toBe(false);
+  });
+
+  it("attaches approval sessions to model-proposed actions", async () => {
+    const runtime = createAikoAgentRuntime({
+      approvalThreadIdFactory: () => "approval-model-action",
+      agentFactory(actions) {
+        return {
+          async invoke() {
+            actions.push(modelAction("Cursor"));
+            return { messages: [{ role: "assistant", content: "鍑嗗鎵撳紑 Cursor." }] };
+          }
+        };
+      }
+    });
+
+    const response = await runtime.respond(textPayload("甯垜澶勭悊涓€涓湰鍦板簲鐢ㄥ姩浣?"));
+
+    expect(response.pendingAction).toMatchObject({
+      capability: "open_application",
+      target: "Cursor",
+      approval: {
+        mode: "interrupt",
+        threadId: "approval-model-action",
+        status: "pending_action"
+      }
+    });
+
+    await expect(runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" })).resolves.toMatchObject({
+      ok: true
+    });
   });
 
   it("routes contextual chat through the LangChain agent", async () => {

@@ -14,7 +14,14 @@ import type {
   ReminderRepository
 } from "../database/repositories";
 import { validateChatPayload, type ChatPayload } from "../../shared/chatPayload";
-import type { ChatResponse, ExecuteActionRequest, PanelName, PendingActionDto, ReminderStatusDto } from "../../shared/ipcTypes";
+import type {
+  CancelActionRequest,
+  ChatResponse,
+  ExecuteActionRequest,
+  PanelName,
+  PendingActionDto,
+  ReminderStatusDto
+} from "../../shared/ipcTypes";
 
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
@@ -152,7 +159,35 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
+    removeSiblingPendingActions(pendingActions, pendingEntry.action);
     return executeApprovedAction(pendingEntry.action, request.remember);
+  });
+
+  ipcMain.handle("action:cancel", async (_event, request: unknown) => {
+    if (!isCancelActionRequest(request)) {
+      return { ok: false, message: "这个取消请求格式不正确." };
+    }
+
+    const actionId = request.action.id;
+    if (!actionId) {
+      return { ok: false, message: "这个操作没有有效的确认令牌." };
+    }
+
+    removeExpiredPendingActions(pendingActions, Date.now());
+    const pendingEntry = pendingActions.get(actionId);
+    pendingActions.delete(actionId);
+    if (!pendingEntry || !sameAction(pendingEntry.action, request.action)) {
+      return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
+    }
+
+    removeSiblingPendingActions(pendingActions, pendingEntry.action);
+    const approval = await deps.agentRuntime.resumePendingActionApproval(pendingEntry.action, {
+      type: "reject",
+      reason: request.reason ?? "user_cancelled"
+    });
+    if (!approval.ok) return approval;
+
+    return { ok: true, message: "已取消. 我没有执行这个操作." };
   });
 
   ipcMain.handle("conversation:list", () => {
@@ -327,6 +362,18 @@ function removeExpiredPendingActions(pendingActions: Map<string, PendingActionEn
 }
 
 // 校验聊天输入, 无效时返回 null 供 IPC 层降级处理.
+// 清理同一个审批线程下的兄弟动作, 避免选择应用后其它候选项残留到 TTL 过期.
+function removeSiblingPendingActions(pendingActions: Map<string, PendingActionEntry>, action: PendingActionDto) {
+  const threadId = action.approval?.threadId;
+  if (!threadId) return;
+
+  for (const [actionId, entry] of pendingActions) {
+    if (entry.action.approval?.threadId === threadId) {
+      pendingActions.delete(actionId);
+    }
+  }
+}
+
 function parseChatPayload(input: unknown): ChatPayload | null {
   try {
     return validateChatPayload(input);
@@ -354,19 +401,32 @@ function isPanelName(value: unknown): value is PanelName {
 function isExecuteActionRequest(value: unknown): value is ExecuteActionRequest {
   if (!value || typeof value !== "object") return false;
   const request = value as ExecuteActionRequest;
-  const action = request.action;
+  return typeof request.remember === "boolean" && isPendingActionRequestAction(request.action);
+}
+
+// 校验取消动作请求, 只允许取消仍在待确认表中的动作.
+function isCancelActionRequest(value: unknown): value is CancelActionRequest {
+  if (!value || typeof value !== "object") return false;
+  const request = value as CancelActionRequest;
+  if (request.reason !== undefined && typeof request.reason !== "string") return false;
+  return isPendingActionRequestAction(request.action);
+}
+
+// 校验跨 IPC 传入的待确认动作结构, 具体能力再交给 isSupportedAction 限制.
+function isPendingActionRequestAction(action: unknown): action is PendingActionDto {
   if (
-    typeof request.remember === "boolean" &&
     !!action &&
     typeof action === "object" &&
-    (action.id === undefined || typeof action.id === "string") &&
-    typeof action.title === "string" &&
-    typeof action.source === "string" &&
-    (action.risk === "low" || action.risk === "medium" || action.risk === "high") &&
-    typeof action.capability === "string" &&
-    typeof action.target === "string"
+    ((action as PendingActionDto).id === undefined || typeof (action as PendingActionDto).id === "string") &&
+    typeof (action as PendingActionDto).title === "string" &&
+    typeof (action as PendingActionDto).source === "string" &&
+    ((action as PendingActionDto).risk === "low" ||
+      (action as PendingActionDto).risk === "medium" ||
+      (action as PendingActionDto).risk === "high") &&
+    typeof (action as PendingActionDto).capability === "string" &&
+    typeof (action as PendingActionDto).target === "string"
   ) {
-    return isSupportedAction(action);
+    return isSupportedAction(action as PendingActionDto);
   }
   return false;
 }
