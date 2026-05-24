@@ -37,6 +37,7 @@ describe("createAikoMemoryAgent", () => {
 
   it("deduplicates extracted candidates and persists the highest confidence candidate", async () => {
     const stored: Array<{ candidate: MemoryCandidate; status: MemoryStatus }> = [];
+    const transcripts: string[] = [];
     const memoryAgent = createAikoMemoryAgent({
       memoryRuntime: {
         async recall() {
@@ -46,7 +47,8 @@ describe("createAikoMemoryAgent", () => {
           stored.push({ candidate, status });
         }
       },
-      async memoryCandidateExtractor() {
+      async memoryCandidateExtractor(transcript) {
+        transcripts.push(transcript);
         return [
           {
             type: "preference",
@@ -72,6 +74,7 @@ describe("createAikoMemoryAgent", () => {
 
     await memoryAgent.rememberExchange("I like quiet focus time.", "I will remember that.");
 
+    expect(transcripts).toEqual(["用户:I like quiet focus time."]);
     expect(stored).toEqual([
       {
         candidate: {

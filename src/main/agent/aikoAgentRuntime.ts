@@ -13,6 +13,10 @@ import {
   describeModelFallback,
   describeModelProposedAction
 } from "../ai/aikoVoice";
+import {
+  isAutoExecutableDesktopMarkdownAction,
+  markAutoExecutableDesktopMarkdownAction
+} from "../actions/localActionTrust";
 import { buildAikoSystemPrompt, MEMORY_EXTRACTION_PROMPT } from "../ai/prompts";
 import type { AppConfig } from "../config/env";
 import type { MemoryCandidate } from "../memory/memoryTypes";
@@ -74,6 +78,7 @@ export type AikoAgentRuntime = {
     action: PendingActionDto,
     decision: AikoPendingActionReviewDecision
   ) => Promise<{ ok: boolean; message: string }>;
+  discardPendingActionApproval: (action: PendingActionDto) => void;
   listConversation: () => ConversationSnapshot;
   resetConversation: () => ConversationSnapshot;
 };
@@ -176,7 +181,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       approvalMode,
       checkpointer: options.workflowCheckpointer,
       async retrieve(input) {
-        const context = await retriever.retrieve(input);
+        const context = await retriever.retrieve(input, { signal });
         throwIfAborted(signal);
         trace.add("retriever.completed", {
           memoryCount: context.memories.length,
@@ -304,6 +309,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     respond: (payload) => respondInternal(payload),
     respondStream: (payload, onDelta, requestOptions) => respondInternal(payload, onDelta, requestOptions),
     resumePendingActionApproval,
+    discardPendingActionApproval,
     listConversation,
     resetConversation
   };
@@ -386,6 +392,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
     approvalSessions.delete(threadId);
     return { ok: true, message: "LangGraph approval resumed." };
+  }
+
+  // 丢弃过期或被其它候选替代的审批会话, 防止 pending action 清掉后 workflow 引用继续滞留.
+  function discardPendingActionApproval(action: PendingActionDto) {
+    const threadId = action.approval?.threadId;
+    if (!threadId) return;
+    approvalSessions.delete(threadId);
   }
 
   // 为模型工具和后置生成的本地动作创建同样的 LangGraph interrupt 审批会话.
@@ -957,7 +970,7 @@ function readWorkflowInterruptPayload(result: unknown): AikoPendingActionReviewP
 
 // 给待执行动作附加可恢复审批元数据, 前端无需理解该字段, 只要原样传回即可.
 function attachWorkflowApproval(action: PendingActionDto, threadId: string): PendingActionDto {
-  return {
+  const attached: PendingActionDto = {
     ...action,
     approval: {
       mode: "interrupt",
@@ -965,6 +978,9 @@ function attachWorkflowApproval(action: PendingActionDto, threadId: string): Pen
       status: "pending_action"
     }
   };
+  return isAutoExecutableDesktopMarkdownAction(action)
+    ? markAutoExecutableDesktopMarkdownAction(attached)
+    : attached;
 }
 
 export function shouldPreferDesktopMarkdownResponse(userText: string, userTranscript = ""): boolean {
@@ -984,7 +1000,7 @@ function createDesktopMarkdownAction(source: string, assistantText: string, pref
   if (!content) return null;
   if (!preferredByRequest && content.length < LONG_RESPONSE_MARKDOWN_THRESHOLD) return null;
 
-  return {
+  return markAutoExecutableDesktopMarkdownAction({
     title: "写入 回复.md",
     source: source.trim().slice(0, 1000) || "长篇回复",
     risk: "medium",
@@ -992,10 +1008,9 @@ function createDesktopMarkdownAction(source: string, assistantText: string, pref
     target: DESKTOP_MARKDOWN_TARGET,
     params: {
       title: "回复",
-      autoExecute: true,
       content
     }
-  };
+  });
 }
 
 // 从 LangChain 返回结构中提取最后一条 assistant 文本.

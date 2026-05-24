@@ -66,8 +66,12 @@ function toApplicationAction(action: PendingActionDto, app: ApplicationConfig, d
     params: defaultFor
       ? {
           ...action.params,
+          applicationPath: app.path,
           defaultFor
         }
-      : action.params
+      : {
+          ...action.params,
+          applicationPath: app.path
+        }
   };
 }

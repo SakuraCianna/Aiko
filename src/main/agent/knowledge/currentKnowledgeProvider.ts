@@ -28,12 +28,17 @@ export type CurrentKnowledgeInput = {
 };
 
 export type CurrentKnowledgeProvider = {
-  retrieve: (input: CurrentKnowledgeInput) => Promise<CurrentKnowledgeContext | null>;
+  retrieve: (input: CurrentKnowledgeInput, options?: CurrentKnowledgeRetrieveOptions) => Promise<CurrentKnowledgeContext | null>;
 };
 
 export type CurrentKnowledgeProviderOptions = {
   fetch?: FetchLike;
   now?: () => Date;
+  timeoutMs?: number;
+};
+
+export type CurrentKnowledgeRetrieveOptions = {
+  signal?: AbortSignal;
 };
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -76,21 +81,23 @@ type GeocodedLocation = {
 
 const OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+const DEFAULT_CURRENT_KNOWLEDGE_TIMEOUT_MS = 8000;
 
 // 创建固定输入输出的实时知识 provider, 当前只保留 Open-Meteo 天气.
 export function createCurrentKnowledgeProvider(options: CurrentKnowledgeProviderOptions = {}): CurrentKnowledgeProvider {
   const fetchImpl = options.fetch ?? globalThis.fetch?.bind(globalThis);
   if (!fetchImpl) throw new Error("CurrentKnowledgeProvider requires fetch");
   const now = options.now ?? (() => new Date());
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CURRENT_KNOWLEDGE_TIMEOUT_MS;
 
   return {
     // 根据用户文本识别天气意图, 不再接入历史, 汇率, 节假日或日出日落等额外 API.
-    async retrieve(input) {
+    async retrieve(input, requestOptions = {}) {
       const intent = detectCurrentKnowledgeIntent(input.userText) ?? detectCurrentKnowledgeIntent(input.userTranscript);
       if (!intent) return null;
 
       try {
-        return await queryWeather(intent.location, fetchImpl, now);
+        return await queryWeather(intent.location, fetchImpl, now, requestOptions.signal, timeoutMs);
       } catch (error) {
         console.warn("[aiko:current-knowledge] lookup failed", {
           kind: intent.kind,
@@ -135,8 +142,14 @@ export function formatCurrentKnowledgeContext(context: CurrentKnowledgeContext |
 }
 
 // 使用 Open-Meteo 的地理编码和天气预报接口查询当前天气.
-async function queryWeather(locationQuery: string, fetchImpl: FetchLike, now: () => Date): Promise<CurrentKnowledgeContext | null> {
-  const location = await geocodeLocation(locationQuery, fetchImpl);
+async function queryWeather(
+  locationQuery: string,
+  fetchImpl: FetchLike,
+  now: () => Date,
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): Promise<CurrentKnowledgeContext | null> {
+  const location = await geocodeLocation(locationQuery, fetchImpl, signal, timeoutMs);
   if (!location) return null;
 
   const url = new URL(OPEN_METEO_FORECAST_URL);
@@ -150,7 +163,7 @@ async function queryWeather(locationQuery: string, fetchImpl: FetchLike, now: ()
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "auto");
 
-  const data = await fetchJson<OpenMeteoForecastResponse>(fetchImpl, url);
+  const data = await fetchJson<OpenMeteoForecastResponse>(fetchImpl, url, signal, timeoutMs);
   const current = data.current;
   if (!current) return null;
   const daily = data.daily ?? {};
@@ -182,13 +195,18 @@ async function queryWeather(locationQuery: string, fetchImpl: FetchLike, now: ()
 }
 
 // 调用 Open-Meteo geocoding, 将城市名解析为经纬度.
-async function geocodeLocation(locationQuery: string, fetchImpl: FetchLike): Promise<GeocodedLocation | null> {
+async function geocodeLocation(
+  locationQuery: string,
+  fetchImpl: FetchLike,
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): Promise<GeocodedLocation | null> {
   const url = new URL(OPEN_METEO_GEOCODING_URL);
   url.searchParams.set("name", locationQuery);
   url.searchParams.set("count", "1");
   url.searchParams.set("language", "zh");
   url.searchParams.set("format", "json");
-  const data = await fetchJson<OpenMeteoGeocodingResponse>(fetchImpl, url);
+  const data = await fetchJson<OpenMeteoGeocodingResponse>(fetchImpl, url, signal, timeoutMs);
   const match = data.results?.find(
     (result) => typeof result.latitude === "number" && typeof result.longitude === "number"
   );
@@ -204,17 +222,49 @@ async function geocodeLocation(locationQuery: string, fetchImpl: FetchLike): Pro
 }
 
 // 统一执行 JSON 请求, 非 2xx 响应直接抛出可诊断错误.
-async function fetchJson<T>(fetchImpl: FetchLike, url: URL): Promise<T> {
-  const response = await fetchImpl(url, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "AikoDesktopPet/0.1"
+async function fetchJson<T>(
+  fetchImpl: FetchLike,
+  url: URL,
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): Promise<T> {
+  const abort = createRequestAbortSignal(signal, timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      signal: abort.signal,
+      headers: {
+        accept: "application/json",
+        "user-agent": "AikoDesktopPet/0.1"
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${url.origin}`);
     }
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url.origin}`);
+    return (await response.json()) as T;
+  } finally {
+    abort.cleanup();
   }
-  return (await response.json()) as T;
+}
+
+// 合并用户中止信号和固定超时信号, 避免外部 API 把 Agent 流程长时间挂住.
+function createRequestAbortSignal(parentSignal: AbortSignal | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error("Current knowledge request timed out")), timeoutMs);
+  const abortFromParent = () => controller.abort(parentSignal?.reason);
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    }
+  };
 }
 
 // 从天气问题里提取地点词.

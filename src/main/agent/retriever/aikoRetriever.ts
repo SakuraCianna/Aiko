@@ -25,7 +25,11 @@ export type AikoRetrieverOptions = {
 };
 
 export type AikoRetriever = {
-  retrieve: (payload: ChatPayload) => Promise<RetrievedContext>;
+  retrieve: (payload: ChatPayload, options?: AikoRetrieverRequestOptions) => Promise<RetrievedContext>;
+};
+
+export type AikoRetrieverRequestOptions = {
+  signal?: AbortSignal;
 };
 
 // 创建 Retriever, 负责准备模型可用的上下文.
@@ -43,12 +47,12 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
 
   return {
     // 召回记忆, 理解语音, 并构造用户上下文.
-    async retrieve(payload) {
+    async retrieve(payload, requestOptions = {}) {
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
       const [memories, research] = await Promise.all([
         memoryAgent.recall(userTranscript, 5),
-        researchAgent.retrieve({ userText: payload.text, userTranscript })
+        researchAgent.retrieve({ userText: payload.text, userTranscript }, requestOptions)
       ]);
       const { webResearch, currentKnowledge } = research;
 

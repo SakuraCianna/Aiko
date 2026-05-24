@@ -90,6 +90,44 @@ describe("createCurrentKnowledgeProvider", () => {
     await expect(provider.retrieve({ userText: "上海今天日出日落时间", userTranscript: "" })).resolves.toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("passes abort signals into Open-Meteo fetches", async () => {
+    const controller = new AbortController();
+    const seenSignals: AbortSignal[] = [];
+    const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (init?.signal instanceof AbortSignal) seenSignals.push(init.signal);
+      const href = String(url);
+      if (href.includes("geocoding-api.open-meteo.com")) {
+        return jsonResponse({
+          results: [
+            {
+              name: "Beijing",
+              country: "China",
+              latitude: 39.9042,
+              longitude: 116.4074
+            }
+          ]
+        });
+      }
+      return jsonResponse({
+        current: {
+          temperature_2m: 23,
+          apparent_temperature: 22,
+          relative_humidity_2m: 45,
+          precipitation: 0,
+          weather_code: 0,
+          wind_speed_10m: 5
+        },
+        daily: {}
+      });
+    });
+    const provider = createCurrentKnowledgeProvider({ fetch: fetchImpl, timeoutMs: 5000 });
+
+    await provider.retrieve({ userText: "查一下北京天气", userTranscript: "" }, { signal: controller.signal });
+
+    expect(seenSignals).toHaveLength(2);
+    expect(seenSignals.every((signal) => !signal.aborted)).toBe(true);
+  });
 });
 
 function jsonResponse(value: unknown): Response {

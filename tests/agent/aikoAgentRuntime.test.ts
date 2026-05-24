@@ -13,6 +13,7 @@ import {
   shouldPreferDesktopMarkdownResponse
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
+import { isAutoExecutableDesktopMarkdownAction } from "../../src/main/actions/localActionTrust";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
 import type { ChatPayload } from "../../src/shared/chatPayload";
 
@@ -852,10 +853,10 @@ describe("createAikoAgentRuntime", () => {
       target: "Desktop/Aiko",
       params: {
         title: "回复",
-        autoExecute: true,
         content: markdown
       }
     });
+    expect(isAutoExecutableDesktopMarkdownAction(response.pendingAction!)).toBe(true);
   });
 
   it("turns unexpectedly long assistant replies into an auto desktop markdown action", async () => {
@@ -877,10 +878,10 @@ describe("createAikoAgentRuntime", () => {
       target: "Desktop/Aiko",
       params: {
         title: "回复",
-        autoExecute: true,
         content: longReply
       }
     });
+    expect(isAutoExecutableDesktopMarkdownAction(response.pendingAction!)).toBe(true);
   });
 
   it("proposes deterministic web search actions", async () => {

@@ -9,6 +9,7 @@ export type WebSearchResult = {
 
 export type WebSearchOptions = {
   maxResults?: number;
+  signal?: AbortSignal;
 };
 
 export type WebSearchProvider = {

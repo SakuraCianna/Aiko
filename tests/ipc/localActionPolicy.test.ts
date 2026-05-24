@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { isAutoExecutableDesktopMarkdownAction } from "../../src/main/ipc/localActionPolicy";
+import {
+  isAutoExecutableDesktopMarkdownAction,
+  markAutoExecutableDesktopMarkdownAction
+} from "../../src/main/ipc/localActionPolicy";
 import type { PendingActionDto } from "../../src/shared/ipcTypes";
 
 describe("local action policy", () => {
   it("only auto-executes runtime-generated desktop markdown replies", () => {
-    expect(isAutoExecutableDesktopMarkdownAction(markdownAction({ autoExecute: true }))).toBe(true);
-    expect(isAutoExecutableDesktopMarkdownAction(markdownAction({ autoExecute: false }))).toBe(false);
-    expect(isAutoExecutableDesktopMarkdownAction(markdownAction({ autoExecute: true }, "Downloads"))).toBe(false);
+    expect(isAutoExecutableDesktopMarkdownAction(markAutoExecutableDesktopMarkdownAction(markdownAction()))).toBe(true);
+    expect(isAutoExecutableDesktopMarkdownAction(markdownAction())).toBe(false);
+    expect(isAutoExecutableDesktopMarkdownAction(markAutoExecutableDesktopMarkdownAction(markdownAction("Downloads")))).toBe(false);
   });
 });
 
-function markdownAction(params: Record<string, string | boolean>, target = "Desktop/Aiko"): PendingActionDto {
+function markdownAction(target = "Desktop/Aiko"): PendingActionDto {
   return {
     title: "写入 回复.md",
     source: "long reply",
@@ -19,8 +22,7 @@ function markdownAction(params: Record<string, string | boolean>, target = "Desk
     target,
     params: {
       title: "回复",
-      content: "# 内容",
-      ...params
+      content: "# 内容"
     }
   };
 }

@@ -49,7 +49,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const writeDesktopMarkdown = createDesktopMarkdownWriter();
   const actionExecutor = createActionExecutor({
     openUrl,
-    openApplication: (query) => openApplication(getApplications(), query),
+    openApplication: (query, expectedPath) => openApplication(getApplications(), query, expectedPath),
     writeDesktopMarkdown,
     now: () => new Date(),
     applicationPreferenceRepository: deps.applicationPreferenceRepository,
@@ -88,7 +88,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!payload) {
       return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
-    if (isConversationResetRequest(payload)) pendingActions.clear();
+    if (isConversationResetRequest(payload)) clearPendingActions();
 
     try {
       const response = await deps.agentRuntime.respond(payload);
@@ -107,7 +107,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!payload) {
       return { message: "这个输入暂时不能处理,可能是附件格式或大小不符合要求." };
     }
-    if (isConversationResetRequest(payload)) pendingActions.clear();
+    if (isConversationResetRequest(payload)) clearPendingActions();
 
     abortPreviousStreamController(requestId);
     const abortController = new AbortController();
@@ -152,14 +152,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作没有有效的确认令牌." };
     }
 
-    removeExpiredPendingActions(pendingActions, Date.now());
+    pruneExpiredPendingActions();
     const pendingEntry = pendingActions.get(actionId);
     pendingActions.delete(actionId);
     if (!pendingEntry || !sameAction(pendingEntry.action, request.action)) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    removeSiblingPendingActions(pendingActions, pendingEntry.action);
+    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action));
     return executeApprovedAction(pendingEntry.action, request.remember);
   });
 
@@ -173,14 +173,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作没有有效的确认令牌." };
     }
 
-    removeExpiredPendingActions(pendingActions, Date.now());
+    pruneExpiredPendingActions();
     const pendingEntry = pendingActions.get(actionId);
     pendingActions.delete(actionId);
     if (!pendingEntry || !sameAction(pendingEntry.action, request.action)) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    removeSiblingPendingActions(pendingActions, pendingEntry.action);
+    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action));
     const approval = await deps.agentRuntime.resumePendingActionApproval(pendingEntry.action, {
       type: "reject",
       reason: request.reason ?? "user_cancelled"
@@ -195,7 +195,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   });
 
   ipcMain.handle("conversation:reset", () => {
-    pendingActions.clear();
+    clearPendingActions();
     return deps.agentRuntime.resetConversation();
   });
 
@@ -337,9 +337,27 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   function storePendingAction(action: PendingActionDto): PendingActionDto & { id: string } {
     const actionId = crypto.randomUUID();
     const pendingAction = { ...action, id: actionId };
-    removeExpiredPendingActions(pendingActions, Date.now());
+    pruneExpiredPendingActions();
     pendingActions.set(actionId, { action: pendingAction, createdAt: Date.now() });
     return pendingAction;
+  }
+
+  // 删除过期 pending action 时同步清理 runtime 内的 LangGraph 审批会话.
+  function pruneExpiredPendingActions() {
+    discardPendingActionApprovals(removeExpiredPendingActions(pendingActions, Date.now()));
+  }
+
+  // 批量丢弃不再可见的审批动作, 避免用户无法确认的 action 继续占用会话.
+  function discardPendingActionApprovals(entries: PendingActionEntry[]) {
+    for (const entry of entries) {
+      deps.agentRuntime.discardPendingActionApproval(entry.action);
+    }
+  }
+
+  // 清空所有待确认动作前先通知 runtime, 让审批会话和 UI 状态一起失效.
+  function clearPendingActions() {
+    discardPendingActionApprovals([...pendingActions.values()]);
+    pendingActions.clear();
   }
 
   // 同一个 requestId 重入时先中止旧流, 避免旧请求失去 controller 后继续后台运行.
@@ -353,25 +371,31 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
 // 校验聊天输入, 无效时返回 null 供 IPC 层降级处理.
 // 清理已经过期的待确认动作, 避免很久之前的授权被重新执行.
-function removeExpiredPendingActions(pendingActions: Map<string, PendingActionEntry>, now: number) {
+function removeExpiredPendingActions(pendingActions: Map<string, PendingActionEntry>, now: number): PendingActionEntry[] {
+  const removed: PendingActionEntry[] = [];
   for (const [actionId, entry] of pendingActions) {
     if (now - entry.createdAt > PENDING_ACTION_TTL_MS) {
       pendingActions.delete(actionId);
+      removed.push(entry);
     }
   }
+  return removed;
 }
 
 // 校验聊天输入, 无效时返回 null 供 IPC 层降级处理.
 // 清理同一个审批线程下的兄弟动作, 避免选择应用后其它候选项残留到 TTL 过期.
-function removeSiblingPendingActions(pendingActions: Map<string, PendingActionEntry>, action: PendingActionDto) {
+function removeSiblingPendingActions(pendingActions: Map<string, PendingActionEntry>, action: PendingActionDto): PendingActionEntry[] {
   const threadId = action.approval?.threadId;
-  if (!threadId) return;
+  if (!threadId) return [];
 
+  const removed: PendingActionEntry[] = [];
   for (const [actionId, entry] of pendingActions) {
     if (entry.action.approval?.threadId === threadId) {
       pendingActions.delete(actionId);
+      removed.push(entry);
     }
   }
+  return removed;
 }
 
 function parseChatPayload(input: unknown): ChatPayload | null {
@@ -445,7 +469,12 @@ function isSupportedAction(action: PendingActionDto): boolean {
   }
 
   if (action.capability === "open_application") {
-    return action.target.trim().length > 0 && action.target.length <= 180;
+    const applicationPath = action.params?.applicationPath;
+    return (
+      action.target.trim().length > 0 &&
+      action.target.length <= 180 &&
+      (applicationPath === undefined || (typeof applicationPath === "string" && applicationPath.length <= 2048))
+    );
   }
 
   if (action.capability === "create_reminder") {

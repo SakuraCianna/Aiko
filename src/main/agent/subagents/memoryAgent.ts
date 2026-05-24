@@ -29,9 +29,9 @@ export function createAikoMemoryAgent(options: AikoMemoryAgentOptions = {}): Aik
     },
 
     // 在一轮对话后静默抽取记忆候选, 去重后写入长期记忆 runtime.
-    async rememberExchange(userTranscript, assistantText) {
+    async rememberExchange(userTranscript, _assistantText) {
       if (!options.memoryCandidateExtractor || !options.memoryRuntime || !userTranscript.trim()) return;
-      const transcript = [`用户:${userTranscript}`, `Aiko:${assistantText}`].join("\n");
+      const transcript = `用户:${userTranscript}`;
       try {
         const candidates = await options.memoryCandidateExtractor(transcript);
         for (const candidate of dedupeCandidates(candidates)) {

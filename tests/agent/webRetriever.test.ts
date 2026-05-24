@@ -37,7 +37,7 @@ describe("createWebRetriever", () => {
       userTranscript: ""
     });
 
-    expect(search).toHaveBeenCalledWith("LangChain MCP", { maxResults: 2 });
+    expect(search).toHaveBeenCalledWith("LangChain MCP", { maxResults: 2, signal: undefined });
     expect(result).toMatchObject({
       query: "LangChain MCP",
       provider: "tavily-mcp"
@@ -64,7 +64,7 @@ describe("createWebRetriever", () => {
       userTranscript: ""
     });
 
-    expect(search).toHaveBeenCalledWith("今天新闻是什么 2026年5月23日", { maxResults: 5 });
+    expect(search).toHaveBeenCalledWith("今天新闻是什么 2026年5月23日", { maxResults: 5, signal: undefined });
   });
 
   it("does not call the provider for ordinary chat", async () => {

@@ -220,6 +220,34 @@ describe("createActionExecutor", () => {
     expect(executor.listReminders()).toMatchObject([{ title: "喝水" }]);
   });
 
+  it("binds remembered application permissions to the resolved application path", async () => {
+    const opened: Array<{ query: string; expectedPath?: string }> = [];
+    const remembered: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async (query, expectedPath) => {
+        opened.push({ query, expectedPath });
+        return true;
+      },
+      now: () => new Date("2026-05-19T10:00:00.000Z"),
+      permissionRepository: {
+        remember: (rule) => remembered.push(`${rule.capability}:${rule.target}`),
+        has: (rule) => rule.target === "Google Chrome|C:\\Chrome\\chrome.exe",
+        list: () => [{ capability: "open_application", target: "Google Chrome|C:\\Chrome\\chrome.exe", risk: "low" }]
+      }
+    });
+
+    const action = {
+      ...lowRiskAction("open_application", "Google Chrome"),
+      params: { applicationPath: "C:\\Chrome\\chrome.exe" }
+    };
+    await executor.execute({ action, remember: true });
+
+    expect(opened).toEqual([{ query: "Google Chrome", expectedPath: "C:\\Chrome\\chrome.exe" }]);
+    expect(remembered).toEqual(["open_application:Google Chrome|C:\\Chrome\\chrome.exe"]);
+    expect(executor.isRememberedAction(action)).toBe(true);
+  });
+
   it("does not remember permissions when execution fails", async () => {
     const remembered: string[] = [];
     const executor = createActionExecutor({

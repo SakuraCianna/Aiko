@@ -77,7 +77,8 @@ export function createTavilyWebSearchProvider(
               search_depth: "basic"
             },
             {
-              timeout: config.timeoutMs
+              timeout: config.timeoutMs,
+              signal: searchOptions.signal
             }
           );
           return normalizeTavilySearchOutput(output);

@@ -18,17 +18,21 @@ export type AikoResearchAgentOptions = {
 };
 
 export type AikoResearchAgent = {
-  retrieve: (input: AikoResearchAgentInput) => Promise<AikoResearchAgentResult>;
+  retrieve: (input: AikoResearchAgentInput, options?: AikoResearchAgentRequestOptions) => Promise<AikoResearchAgentResult>;
+};
+
+export type AikoResearchAgentRequestOptions = {
+  signal?: AbortSignal;
 };
 
 // 创建 Research 子 Agent, 统一管理外部检索和固定实时知识 provider.
 export function createAikoResearchAgent(options: AikoResearchAgentOptions = {}): AikoResearchAgent {
   return {
     // 并行获取网页检索和实时知识, 单个 provider 失败时只降级对应结果.
-    async retrieve(input) {
+    async retrieve(input, requestOptions = {}) {
       const [webResearch, currentKnowledge] = await Promise.all([
-        retrieveWebResearch(options.webRetriever, input),
-        retrieveCurrentKnowledge(options.currentKnowledgeProvider, input)
+        retrieveWebResearch(options.webRetriever, input, requestOptions),
+        retrieveCurrentKnowledge(options.currentKnowledgeProvider, input, requestOptions)
       ]);
 
       return {
@@ -42,11 +46,12 @@ export function createAikoResearchAgent(options: AikoResearchAgentOptions = {}):
 // 调用网页检索器, 失败时降级为空上下文, 避免 Tavily/MCP 阻断本地聊天.
 async function retrieveWebResearch(
   webRetriever: WebRetriever | undefined,
-  input: AikoResearchAgentInput
+  input: AikoResearchAgentInput,
+  options: AikoResearchAgentRequestOptions
 ): Promise<WebResearchContext | null> {
   if (!webRetriever) return null;
   try {
-    return await webRetriever.retrieve(input);
+    return await webRetriever.retrieve(input, options);
   } catch (error) {
     console.warn("[aiko:research-agent] web research failed", {
       name: error instanceof Error ? error.name : typeof error,
@@ -59,11 +64,12 @@ async function retrieveWebResearch(
 // 调用固定实时知识 provider, 失败时降级为空上下文, 避免外部 API 阻断主流程.
 async function retrieveCurrentKnowledge(
   currentKnowledgeProvider: CurrentKnowledgeProvider | undefined,
-  input: AikoResearchAgentInput
+  input: AikoResearchAgentInput,
+  options: AikoResearchAgentRequestOptions
 ): Promise<CurrentKnowledgeContext | null> {
   if (!currentKnowledgeProvider) return null;
   try {
-    return await currentKnowledgeProvider.retrieve(input);
+    return await currentKnowledgeProvider.retrieve(input, options);
   } catch (error) {
     console.warn("[aiko:research-agent] current knowledge failed", {
       name: error instanceof Error ? error.name : typeof error,

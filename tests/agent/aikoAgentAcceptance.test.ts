@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAikoAgentRuntime } from "../../src/main/agent/aikoAgentRuntime";
+import { isAutoExecutableDesktopMarkdownAction } from "../../src/main/actions/localActionTrust";
 import type { ChatPayload } from "../../src/shared/chatPayload";
 
 describe("Aiko agent acceptance flows", () => {
@@ -128,10 +129,10 @@ describe("Aiko agent acceptance flows", () => {
         status: "pending_action"
       },
       params: {
-        autoExecute: true,
         content: markdown
       }
     });
+    expect(isAutoExecutableDesktopMarkdownAction(response.pendingAction!)).toBe(true);
   });
 });
 

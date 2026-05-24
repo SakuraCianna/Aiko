@@ -16,7 +16,10 @@ describe("resolveOpenApplicationAction", () => {
       action: {
         ...appAction("Visual Studio Code"),
         source: "打开 VS Code",
-        target: "Visual Studio Code"
+        target: "Visual Studio Code",
+        params: {
+          applicationPath: "C:\\Code\\Code.exe"
+        }
       }
     });
   });
@@ -44,7 +47,10 @@ describe("resolveOpenApplicationAction", () => {
       action: {
         ...appAction("Microsoft Edge"),
         source: "打开 浏览器",
-        target: "Microsoft Edge"
+        target: "Microsoft Edge",
+        params: {
+          applicationPath: "C:\\Edge\\msedge.exe"
+        }
       }
     });
   });

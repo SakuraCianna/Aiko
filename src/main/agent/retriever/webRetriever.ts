@@ -7,7 +7,11 @@ export type WebRetrieverInput = {
 };
 
 export type WebRetriever = {
-  retrieve: (input: WebRetrieverInput) => Promise<WebResearchContext | null>;
+  retrieve: (input: WebRetrieverInput, options?: WebRetrieverRequestOptions) => Promise<WebResearchContext | null>;
+};
+
+export type WebRetrieverRequestOptions = {
+  signal?: AbortSignal;
 };
 
 export type WebRetrieverOptions = {
@@ -23,12 +27,12 @@ export function createWebRetriever(options: WebRetrieverOptions): WebRetriever {
 
   return {
     // 检测联网需求并把搜索结果转换为 Aiko 可注入的 grounding 上下文.
-    async retrieve(input) {
+    async retrieve(input, requestOptions = {}) {
       const query = selectWebSearchQuery(input.userText, input.userTranscript);
       if (!query) return null;
       const searchQuery = enhanceWebSearchQuery(query, now());
 
-      const results = await options.provider.search(searchQuery, { maxResults });
+      const results = await options.provider.search(searchQuery, { maxResults, signal: requestOptions.signal });
       if (results.length === 0) return null;
 
       return {

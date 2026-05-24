@@ -26,6 +26,8 @@ const DEFAULT_TAVILY_MCP_PACKAGE = "tavily-mcp@0.2.19";
 const DEFAULT_TAVILY_REMOTE_URL = "https://mcp.tavily.com/mcp/";
 const DEFAULT_TAVILY_MAX_RESULTS = 5;
 const DEFAULT_TAVILY_TIMEOUT_MS = 15000;
+const ALLOWED_TAVILY_MCP_PACKAGES = new Set([DEFAULT_TAVILY_MCP_PACKAGE]);
+const ALLOWED_TAVILY_REMOTE_HOSTS = new Set(["mcp.tavily.com"]);
 
 // 从环境变量解析应用运行所需的模型配置.
 export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
@@ -94,8 +96,8 @@ function readTavilyMcpConfig(env: NodeJS.ProcessEnv): AppConfig["mcp"]["tavily"]
     mode,
     apiKey,
     apiKeys,
-    remoteUrl: readOptional(env, "MCP_TAVILY_REMOTE_URL") || DEFAULT_TAVILY_REMOTE_URL,
-    packageName: readOptional(env, "MCP_TAVILY_PACKAGE") || DEFAULT_TAVILY_MCP_PACKAGE,
+    remoteUrl: readTavilyRemoteUrl(env.MCP_TAVILY_REMOTE_URL),
+    packageName: readTavilyPackageName(env.MCP_TAVILY_PACKAGE),
     maxResults: readPositiveInteger(env, "MCP_TAVILY_MAX_RESULTS", DEFAULT_TAVILY_MAX_RESULTS),
     timeoutMs: readPositiveInteger(env, "MCP_TAVILY_TIMEOUT_MS", DEFAULT_TAVILY_TIMEOUT_MS)
   };
@@ -151,6 +153,23 @@ function readTavilyMode(value: string | undefined): "stdio" | "remote" {
   const normalized = value?.trim().toLowerCase() || "stdio";
   if (normalized === "stdio" || normalized === "remote") return normalized;
   throw new Error("Invalid MCP_TAVILY_MODE, expected stdio or remote");
+}
+
+// Tavily stdio 模式会启动本地 npm 包, 所以只能接受固定白名单包名.
+function readTavilyPackageName(value: string | undefined): string {
+  const packageName = readOptional({ MCP_TAVILY_PACKAGE: value }, "MCP_TAVILY_PACKAGE") || DEFAULT_TAVILY_MCP_PACKAGE;
+  if (ALLOWED_TAVILY_MCP_PACKAGES.has(packageName)) return packageName;
+  throw new Error("Invalid MCP_TAVILY_PACKAGE, only approved Tavily MCP packages are allowed");
+}
+
+// Tavily remote 模式只允许官方 HTTPS endpoint, 避免任意 MCP server 混入外部指令.
+function readTavilyRemoteUrl(value: string | undefined): string {
+  const remoteUrl = readOptional({ MCP_TAVILY_REMOTE_URL: value }, "MCP_TAVILY_REMOTE_URL") || DEFAULT_TAVILY_REMOTE_URL;
+  const parsed = new URL(remoteUrl);
+  if (parsed.protocol !== "https:" || !ALLOWED_TAVILY_REMOTE_HOSTS.has(parsed.hostname)) {
+    throw new Error("Invalid MCP_TAVILY_REMOTE_URL, only approved Tavily HTTPS hosts are allowed");
+  }
+  return parsed.toString();
 }
 
 // 读取正整数配置, 避免超时和结果数量被配置成不可用值.

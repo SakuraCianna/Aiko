@@ -20,7 +20,7 @@ import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown
 
 export type ActionExecutorDeps = {
   openUrl: (url: string) => Promise<void>;
-  openApplication: (query: string) => Promise<boolean>;
+  openApplication: (query: string, expectedPath?: string) => Promise<boolean>;
   writeDesktopMarkdown?: DesktopMarkdownWriter;
   now: () => Date;
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
@@ -92,7 +92,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     }
 
     if (action.capability === "open_application") {
-      const opened = await deps.openApplication(action.target);
+      const opened = await deps.openApplication(action.target, readStringParam(action.params, "applicationPath") ?? undefined);
       if (opened) {
         rememberSuccessfulPermission(action, remember);
         rememberDefaultApplication(action, remember);
@@ -235,9 +235,16 @@ function toPermissionRule(
 ): PermissionRule {
   return {
     capability: action.capability,
-    target: action.target,
+    target: permissionTarget(action),
     risk: action.risk,
   };
+}
+
+// 应用授权绑定到已解析路径, 避免同名快捷方式在未来接管 remembered 权限.
+function permissionTarget(action: ExecuteActionRequest["action"]): string {
+  if (action.capability !== "open_application") return action.target;
+  const applicationPath = readStringParam(action.params, "applicationPath");
+  return applicationPath ? `${action.target}|${applicationPath}` : action.target;
 }
 
 // 生成权限规则的稳定 key.
