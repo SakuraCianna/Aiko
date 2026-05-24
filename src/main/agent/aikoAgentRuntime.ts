@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import type { BaseMessageLike } from "@langchain/core/messages";
+import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { ChatOpenAICompletions } from "@langchain/openai";
 import { createAgent, tool } from "langchain";
 import { z } from "zod";
@@ -17,6 +19,14 @@ import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import { classifyMemoryCandidate, extractMemoryCandidates } from "../memory/silentMemoryWorker";
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
+import {
+  createAikoAgentWorkflow,
+  isAikoAgentWorkflowInterrupted,
+  type AikoAgentWorkflow,
+  type AikoAgentWorkflowApprovalMode,
+  type AikoPendingActionReviewDecision,
+  type AikoPendingActionReviewPayload
+} from "./graph/aikoAgentWorkflow";
 import { createCurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
 import type { CurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
 import { createTavilyWebSearchProvider } from "./mcp/tavilyMcpProvider";
@@ -56,6 +66,10 @@ export type AikoAgentRuntime = {
     onDelta: (text: string) => void,
     options?: AikoAgentRequestOptions
   ) => Promise<ChatResponse>;
+  resumePendingActionApproval: (
+    action: PendingActionDto,
+    decision: AikoPendingActionReviewDecision
+  ) => Promise<{ ok: boolean; message: string }>;
   listConversation: () => ConversationSnapshot;
   resetConversation: () => ConversationSnapshot;
 };
@@ -88,6 +102,9 @@ export type AikoAgentRuntimeOptions = {
   webRetriever?: WebRetriever;
   traceRecorder?: AikoTraceRecorder;
   currentKnowledgeProvider?: CurrentKnowledgeProvider;
+  approvalMode?: AikoAgentWorkflowApprovalMode;
+  approvalThreadIdFactory?: () => string;
+  workflowCheckpointer?: BaseCheckpointSaver;
   maxConversationMessages?: number;
   maxConversationContextChars?: number;
 };
@@ -112,6 +129,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const planner = createAikoPlanner();
   const executor = createAikoExecutor();
   const traceRecorder = options.traceRecorder ?? createAikoTraceRecorder();
+  const approvalMode = options.approvalMode ?? "passive";
+  const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
+  const approvalSessions = new Map<string, AikoAgentWorkflow>();
   const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
   const memoryCandidateExtractor =
     options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
@@ -147,26 +167,56 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     const trace = traceRecorder.start();
-    const context = await retriever.retrieve(payload);
-    throwIfAborted(signal);
-    trace.add("retriever.completed", {
-      memoryCount: context.memories.length,
-      attachmentCount: context.attachmentSummaries.length,
-      currentKnowledgeKind: context.currentKnowledge?.kind ?? null
+    const approvalThreadId = approvalMode === "interrupt" ? approvalThreadIdFactory() : undefined;
+    const workflow = createAikoAgentWorkflow({
+      approvalMode,
+      checkpointer: options.workflowCheckpointer,
+      async retrieve(input) {
+        const context = await retriever.retrieve(input);
+        throwIfAborted(signal);
+        trace.add("retriever.completed", {
+          memoryCount: context.memories.length,
+          attachmentCount: context.attachmentSummaries.length,
+          currentKnowledgeKind: context.currentKnowledge?.kind ?? null
+        });
+        return context;
+      },
+      async plan(context) {
+        const plan = await planner.plan({
+          userText: context.userText,
+          userTranscript: context.userTranscript,
+          toolHints: context.toolHints
+        });
+        throwIfAborted(signal);
+        trace.add("planner.completed", {
+          mode: plan.mode,
+          stepCount: plan.steps.length
+        });
+        return plan;
+      },
+      async prepare(plan) {
+        const proposal = await executor.prepare(plan);
+        throwIfAborted(signal);
+        return proposal;
+      }
     });
-
-    const plan = await planner.plan({
-      userText: context.userText,
-      userTranscript: context.userTranscript,
-      toolHints: context.toolHints
-    });
-    throwIfAborted(signal);
-    trace.add("planner.completed", {
-      mode: plan.mode,
-      stepCount: plan.steps.length
-    });
-
-    const proposal = await executor.prepare(plan);
+    const workflowOutput = await workflow.invoke(payload, { threadId: approvalThreadId });
+    if (isAikoAgentWorkflowInterrupted(workflowOutput)) {
+      if (!approvalThreadId) throw new Error("Aiko workflow interrupted without an approval thread");
+      const reviewPayload = readWorkflowInterruptPayload(workflowOutput);
+      if (!reviewPayload) throw new Error("Aiko workflow interrupted without a pending action payload");
+      approvalSessions.set(approvalThreadId, workflow);
+      const action = attachWorkflowApproval(reviewPayload.action, approvalThreadId);
+      emitDelta(reviewPayload.message);
+      trace.add("executor.prepared", {
+        capability: action.capability,
+        risk: action.risk
+      });
+      trace.end({ mode: "action" });
+      rememberConversationTurn(payload.text, reviewPayload.message);
+      return respondWithAction(reviewPayload.message, action);
+    }
+    const { context, proposal } = workflowOutput;
     throwIfAborted(signal);
     if (proposal.kind === "pending_action") {
       emitDelta(proposal.message);
@@ -247,6 +297,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   return {
     respond: (payload) => respondInternal(payload),
     respondStream: (payload, onDelta, requestOptions) => respondInternal(payload, onDelta, requestOptions),
+    resumePendingActionApproval,
     listConversation,
     resetConversation
   };
@@ -302,7 +353,32 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   // 清空当前短期上下文, 不触碰长期记忆, 权限和偏好.
   function resetConversation(): ConversationSnapshot {
     conversationMessages.length = 0;
+    approvalSessions.clear();
     return listConversation();
+  }
+
+  // 恢复由 LangGraph interrupt 暂停的本地动作审批, IPC 确认后再继续工作流.
+  async function resumePendingActionApproval(
+    action: PendingActionDto,
+    decision: AikoPendingActionReviewDecision
+  ): Promise<{ ok: boolean; message: string }> {
+    if (action.approval?.mode !== "interrupt" || !action.approval.threadId) {
+      return { ok: true, message: "No LangGraph approval session is attached." };
+    }
+
+    const threadId = action.approval.threadId;
+    const workflow = approvalSessions.get(threadId);
+    if (!workflow) {
+      return { ok: false, message: "This approval session has expired or was already resumed." };
+    }
+
+    const result = await workflow.resume(decision, { threadId });
+    if (isAikoAgentWorkflowInterrupted(result)) {
+      return { ok: false, message: "This approval session still needs another decision." };
+    }
+
+    approvalSessions.delete(threadId);
+    return { ok: true, message: "LangGraph approval resumed." };
   }
 }
 
@@ -844,6 +920,26 @@ function respondWithAction(message: string, action: PendingActionDto): ChatRespo
 }
 
 // 判断这次请求是否更适合落成 Markdown 文件, 避免长文塞进桌宠消息区.
+// 从 LangGraph interrupt 结果中提取人工审批 payload.
+function readWorkflowInterruptPayload(result: unknown): AikoPendingActionReviewPayload | null {
+  if (!isAikoAgentWorkflowInterrupted(result)) return null;
+  const payload = result.__interrupt__[0]?.value;
+  if (payload?.kind !== "pending_action_review") return null;
+  return payload;
+}
+
+// 给待执行动作附加可恢复审批元数据, 前端无需理解该字段, 只要原样传回即可.
+function attachWorkflowApproval(action: PendingActionDto, threadId: string): PendingActionDto {
+  return {
+    ...action,
+    approval: {
+      mode: "interrupt",
+      threadId,
+      status: "pending_action"
+    }
+  };
+}
+
 export function shouldPreferDesktopMarkdownResponse(userText: string, userTranscript = ""): boolean {
   const text = `${userText}\n${userTranscript}`.trim();
   if (!text) return false;

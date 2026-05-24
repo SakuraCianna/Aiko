@@ -98,6 +98,38 @@ describe("createAikoAgentRuntime", () => {
     });
   });
 
+  it("can pause deterministic pending actions and resume their LangGraph approval", async () => {
+    const runtime = createAikoAgentRuntime({
+      approvalMode: "interrupt",
+      approvalThreadIdFactory: () => "approval-thread-1",
+      agent: {
+        async invoke() {
+          throw new Error("deterministic action should not call the model");
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("https://example.com"));
+
+    expect(response.pendingAction).toMatchObject({
+      capability: "open_url",
+      target: "https://example.com",
+      approval: {
+        mode: "interrupt",
+        threadId: "approval-thread-1",
+        status: "pending_action"
+      }
+    });
+
+    const approved = await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
+
+    expect(approved.ok).toBe(true);
+
+    const duplicate = await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
+
+    expect(duplicate.ok).toBe(false);
+  });
+
   it("routes contextual chat through the LangChain agent", async () => {
     const runtime = createAikoAgentRuntime({
       agent: {

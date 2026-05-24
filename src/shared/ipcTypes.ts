@@ -2,6 +2,12 @@ import type { ChatPayload } from "./chatPayload";
 
 export type PanelName = "chat" | "reminders" | "memory" | "settings";
 
+export type PendingActionApprovalDto = {
+  mode: "passive" | "interrupt";
+  threadId?: string;
+  status: "pending_action" | "reviewed";
+};
+
 export type PendingActionBaseDto = {
   id?: string;
   title: string;
@@ -10,6 +16,7 @@ export type PendingActionBaseDto = {
   capability: string;
   target: string;
   params?: Record<string, string | number | boolean>;
+  approval?: PendingActionApprovalDto;
 };
 
 export type PendingActionChoiceDto = {

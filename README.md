@@ -115,6 +115,7 @@ assets/vrm/Aiko.vrm                 默认 VRM 测试模型
 src/main/index.ts                   Electron 主进程入口
 src/main/ipc/handlers.ts            Renderer 和主进程之间的 IPC 边界
 src/main/agent/aikoAgentRuntime.ts  LangChain Agent Runtime
+src/main/agent/graph/               LangGraph Functional API 工作流边界
 src/main/agent/mcp/                 MCP 外部能力接入层, 当前包含 Tavily 搜索 provider
 src/main/agent/retriever/           记忆, 附件, 语音上下文和工具提示整理
 src/main/agent/planner/             意图判断和计划生成

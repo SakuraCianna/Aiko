@@ -14,8 +14,17 @@ describe("Aiko agent architecture boundary", () => {
 
     expect(source).toContain("createAikoAgentRuntime");
     expect(source).toContain("createAgent");
+    expect(source).toContain("createAikoAgentWorkflow");
     expect(source).not.toContain("createGlmClient");
     expect(source).not.toContain("routeIntent");
+  });
+
+  it("keeps explicit LangGraph orchestration inside the agent graph boundary", () => {
+    const graphWorkflow = readFileSync("src/main/agent/graph/aikoAgentWorkflow.ts", "utf8");
+
+    expect(graphWorkflow).toContain("@langchain/langgraph");
+    expect(graphWorkflow).toContain("entrypoint");
+    expect(graphWorkflow).toContain("task");
   });
 
   it("keeps LangChain provider imports inside the agent runtime boundary", () => {
@@ -57,8 +66,15 @@ describe("Aiko agent architecture boundary", () => {
     const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
 
     expect(ipcHandlers).toContain("if (actionExecutor.isRememberedAction(decision.action))");
-    expect(ipcHandlers).toContain("await actionExecutor.execute({ action: decision.action, remember: false })");
+    expect(ipcHandlers).toContain("await executeApprovedAction(decision.action, false)");
     expect(ipcHandlers).toContain("return { message, pendingAction: storePendingAction(decision.action) }");
+  });
+
+  it("resumes workflow approval before executing local actions", () => {
+    const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+
+    expect(ipcHandlers).toContain("resumePendingActionApproval(action, { type: \"approve\" })");
+    expect(ipcHandlers).toContain("return actionExecutor.execute({ action, remember })");
   });
 
   it("documents that future agent work must extend the LangChain runtime", () => {

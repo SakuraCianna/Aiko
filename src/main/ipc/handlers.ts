@@ -152,7 +152,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    return actionExecutor.execute({ action: pendingEntry.action, remember: request.remember });
+    return executeApprovedAction(pendingEntry.action, request.remember);
   });
 
   ipcMain.handle("conversation:list", () => {
@@ -222,7 +222,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!isSupportedAction(action)) return { message };
 
     if (isAutoExecutableDesktopMarkdownAction(action)) {
-      const result = await actionExecutor.execute({ action, remember: false });
+      const result = await executeApprovedAction(action, false);
       return { message: result.message };
     }
 
@@ -235,7 +235,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       }
 
       if (actionExecutor.isRememberedAction(decision.action)) {
-        const result = await actionExecutor.execute({ action: decision.action, remember: false });
+        const result = await executeApprovedAction(decision.action, false);
         return { message: result.message };
       }
 
@@ -243,7 +243,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     }
 
     if (actionExecutor.isRememberedAction(action)) {
-      const result = await actionExecutor.execute({ action, remember: false });
+      const result = await executeApprovedAction(action, false);
       return { message: result.message };
     }
 
@@ -258,7 +258,8 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     actions: PendingActionDto[]
   ): ChatResponse {
     const choices = actions.map((candidate) => {
-      const pendingChoice = storePendingAction(candidate);
+      const actionWithApproval = sourceAction.approval ? { ...candidate, approval: sourceAction.approval } : candidate;
+      const pendingChoice = storePendingAction(actionWithApproval);
       return {
         id: pendingChoice.id,
         title: pendingChoice.target,
@@ -270,7 +271,8 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
           risk: pendingChoice.risk,
           capability: pendingChoice.capability,
           target: pendingChoice.target,
-          params: pendingChoice.params
+          params: pendingChoice.params,
+          approval: pendingChoice.approval
         }
       };
     });
@@ -287,6 +289,13 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
         choices
       }
     };
+  }
+
+  // 在真正调用本地能力前先恢复 LangGraph 审批, 保证自动授权路径也不会绕过工作流.
+  async function executeApprovedAction(action: PendingActionDto, remember: boolean) {
+    const approval = await deps.agentRuntime.resumePendingActionApproval(action, { type: "approve" });
+    if (!approval.ok) return approval;
+    return actionExecutor.execute({ action, remember });
   }
 
   // 保存一个待确认动作并分配一次性确认令牌.
@@ -452,6 +461,7 @@ function sameAction(left: PendingActionDto, right: PendingActionDto): boolean {
     left.risk === right.risk &&
     left.capability === right.capability &&
     left.target === right.target &&
-    JSON.stringify(left.params ?? {}) === JSON.stringify(right.params ?? {})
+    JSON.stringify(left.params ?? {}) === JSON.stringify(right.params ?? {}) &&
+    JSON.stringify(left.approval ?? {}) === JSON.stringify(right.approval ?? {})
   );
 }
