@@ -27,6 +27,20 @@ describe("Aiko agent architecture boundary", () => {
     expect(graphWorkflow).toContain("task");
   });
 
+  it("keeps research and memory concerns behind subagent boundaries", () => {
+    const researchAgentPath = join("src", "main", "agent", "subagents", "researchAgent.ts");
+    const memoryAgentPath = join("src", "main", "agent", "subagents", "memoryAgent.ts");
+    const retriever = readFileSync("src/main/agent/retriever/aikoRetriever.ts", "utf8");
+    const runtime = readFileSync("src/main/agent/aikoAgentRuntime.ts", "utf8");
+
+    expect(existsSync(researchAgentPath)).toBe(true);
+    expect(existsSync(memoryAgentPath)).toBe(true);
+    expect(retriever).toContain("createAikoResearchAgent");
+    expect(retriever).toContain("createAikoMemoryAgent");
+    expect(runtime).toContain("createAikoMemoryAgent");
+    expect(runtime).not.toContain("classifyMemoryCandidate");
+  });
+
   it("keeps LangChain provider imports inside the agent runtime boundary", () => {
     const mainEntry = readFileSync("src/main/index.ts", "utf8");
     const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");

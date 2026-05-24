@@ -15,8 +15,8 @@ import {
 } from "../ai/aikoVoice";
 import { buildAikoSystemPrompt, MEMORY_EXTRACTION_PROMPT } from "../ai/prompts";
 import type { AppConfig } from "../config/env";
-import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
-import { classifyMemoryCandidate, extractMemoryCandidates } from "../memory/silentMemoryWorker";
+import type { MemoryCandidate } from "../memory/memoryTypes";
+import { extractMemoryCandidates } from "../memory/silentMemoryWorker";
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
 import {
@@ -35,6 +35,8 @@ import { createTavilyWebSearchProvider } from "./mcp/tavilyMcpProvider";
 import { buildSearchUrl, createAikoPlanner } from "./planner/aikoPlanner";
 import { createAikoRetriever } from "./retriever/aikoRetriever";
 import { createWebRetriever } from "./retriever/webRetriever";
+import { createAikoMemoryAgent } from "./subagents/memoryAgent";
+import type { AikoMemoryAgent, MemoryCandidateExtractor } from "./subagents/memoryAgent";
 import { createDefaultToolRegistry } from "./tools/toolRegistry";
 import { createAikoTraceRecorder } from "./trace/aikoTrace";
 import type { AgentUserContent, AikoMemoryRuntime } from "./types";
@@ -80,8 +82,6 @@ export type AikoAgentRequestOptions = {
   signal?: AbortSignal;
 };
 
-export type MemoryCandidateExtractor = (transcript: string) => Promise<MemoryCandidate[]>;
-
 export type ConversationMessage = {
   role: "user" | "assistant";
   content: string;
@@ -99,6 +99,7 @@ export type AikoAgentRuntimeOptions = {
   agent?: AikoAgentInvoker;
   agentFactory?: AikoAgentFactory;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
+  memoryAgent?: AikoMemoryAgent;
   memoryRuntime?: AikoMemoryRuntime;
   memoryCandidateExtractor?: MemoryCandidateExtractor;
   webRetriever?: WebRetriever;
@@ -121,8 +122,17 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const toolRegistry = createDefaultToolRegistry();
   const webRetriever = options.webRetriever ?? createDefaultWebRetriever(options.config);
   const currentKnowledgeProvider = options.currentKnowledgeProvider ?? createCurrentKnowledgeProvider();
+  const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
+  const memoryCandidateExtractor =
+    options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
+  const memoryAgent =
+    options.memoryAgent ??
+    createAikoMemoryAgent({
+      memoryRuntime: options.memoryRuntime,
+      memoryCandidateExtractor
+    });
   const retriever = createAikoRetriever({
-    memoryRuntime: options.memoryRuntime,
+    memoryAgent,
     speechUnderstandingProvider,
     toolRegistry,
     webRetriever,
@@ -134,14 +144,6 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const approvalMode = options.approvalMode ?? "interrupt";
   const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
   const approvalSessions = new Map<string, AikoAgentWorkflow | AikoActionApprovalWorkflow>();
-  const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
-  const memoryCandidateExtractor =
-    options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
-  const runtimeOptions = {
-    ...options,
-    memoryCandidateExtractor
-  };
-
   // 处理一次普通或流式聊天请求.
   async function respondInternal(
     payload: ChatPayload,
@@ -260,7 +262,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         const message = describeModelProposedAction(action);
         const approvedAction = await preparePendingActionApproval(message, action);
         if (!assistantText) emitDelta(message);
-        await rememberExchange(runtimeOptions, context.userTranscript, assistantText || message);
+        await memoryAgent.rememberExchange(context.userTranscript, assistantText || message);
         trace.end({ mode: "tool_action" });
         rememberConversationTurn(context.userTranscript, assistantText || message);
         return respondWithAction(message, approvedAction);
@@ -270,7 +272,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       if (markdownAction) {
         const message = describePendingAction(markdownAction);
         const approvedAction = await preparePendingActionApproval(message, markdownAction);
-        await rememberExchange(runtimeOptions, context.userTranscript, assistantText);
+        await memoryAgent.rememberExchange(context.userTranscript, assistantText);
         trace.end({ mode: "markdown_action" });
         rememberConversationTurn(context.userTranscript, message);
         return respondWithAction(message, approvedAction);
@@ -278,7 +280,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
       const message = assistantText || describeEmptyAssistantReply();
       if (!assistantText) emitDelta(message);
-      await rememberExchange(runtimeOptions, context.userTranscript, message);
+      await memoryAgent.rememberExchange(context.userTranscript, message);
       trace.end({ mode: "chat" });
       rememberConversationTurn(context.userTranscript, message);
       return { message };
@@ -994,40 +996,6 @@ function createDesktopMarkdownAction(source: string, assistantText: string, pref
       content
     }
   };
-}
-
-// 在一次对话后静默抽取并保存可能有价值的长期记忆.
-async function rememberExchange(
-  options: Pick<AikoAgentRuntimeOptions, "memoryCandidateExtractor" | "memoryRuntime">,
-  userTranscript: string,
-  assistantText: string
-) {
-  if (!options.memoryCandidateExtractor || !options.memoryRuntime || !userTranscript.trim()) return;
-  const transcript = [`用户:${userTranscript}`, `Aiko:${assistantText}`].join("\n");
-  try {
-    const candidates = await options.memoryCandidateExtractor(transcript);
-    for (const candidate of dedupeCandidates(candidates)) {
-      await options.memoryRuntime.rememberCandidate(candidate, classifyMemoryCandidate(candidate));
-    }
-  } catch {
-    return;
-  }
-}
-
-// 对同类型同内容的记忆候选去重, 保留置信度最高的一条.
-function dedupeCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
-  const byKey = new Map<string, MemoryCandidate>();
-  for (const candidate of candidates) {
-    const key = `${candidate.type}:${candidate.content.trim().toLowerCase()}`;
-    const existing = byKey.get(key);
-    if (!existing || candidate.confidence > existing.confidence) {
-      byKey.set(key, {
-        ...candidate,
-        content: candidate.content.trim()
-      });
-    }
-  }
-  return [...byKey.values()];
 }
 
 // 从 LangChain 返回结构中提取最后一条 assistant 文本.

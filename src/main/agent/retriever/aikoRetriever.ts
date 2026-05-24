@@ -6,12 +6,18 @@ import { formatCurrentKnowledgeContext } from "../knowledge/currentKnowledgeProv
 import type { CurrentKnowledgeContext, CurrentKnowledgeProvider } from "../knowledge/currentKnowledgeProvider";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
+import { createAikoMemoryAgent } from "../subagents/memoryAgent";
+import type { AikoMemoryAgent } from "../subagents/memoryAgent";
+import { createAikoResearchAgent } from "../subagents/researchAgent";
+import type { AikoResearchAgent } from "../subagents/researchAgent";
 import { formatWebResearchContext } from "./webRetriever";
 import type { WebRetriever } from "./webRetriever";
 import type { WebResearchContext } from "./webTypes";
 
 export type AikoRetrieverOptions = {
+  memoryAgent?: AikoMemoryAgent;
   memoryRuntime?: AikoMemoryRuntime;
+  researchAgent?: AikoResearchAgent;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   toolRegistry?: AikoToolRegistry;
   webRetriever?: WebRetriever;
@@ -24,6 +30,13 @@ export type AikoRetriever = {
 
 // 创建 Retriever, 负责准备模型可用的上下文.
 export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetriever {
+  const memoryAgent = options.memoryAgent ?? createAikoMemoryAgent({ memoryRuntime: options.memoryRuntime });
+  const researchAgent =
+    options.researchAgent ??
+    createAikoResearchAgent({
+      webRetriever: options.webRetriever,
+      currentKnowledgeProvider: options.currentKnowledgeProvider
+    });
   const speechUnderstandingProvider =
     options.speechUnderstandingProvider ?? createPendingSpeechUnderstandingProvider();
   const toolRegistry = options.toolRegistry ?? createDefaultToolRegistry();
@@ -33,11 +46,11 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
     async retrieve(payload) {
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
-      const [memories, webResearch, currentKnowledge] = await Promise.all([
-        recallForAgent(options.memoryRuntime, userTranscript),
-        retrieveWebResearch(options.webRetriever, payload.text, userTranscript),
-        retrieveCurrentKnowledge(options.currentKnowledgeProvider, payload.text, userTranscript)
+      const [memories, research] = await Promise.all([
+        memoryAgent.recall(userTranscript, 5),
+        researchAgent.retrieve({ userText: payload.text, userTranscript })
       ]);
+      const { webResearch, currentKnowledge } = research;
 
       return {
         userText: payload.text,
@@ -141,53 +154,7 @@ export function buildUserContent(
   return parts;
 }
 
-// 从长期记忆中召回和当前输入相关的内容.
-async function recallForAgent(memoryRuntime: AikoMemoryRuntime | undefined, query: string): Promise<RecalledMemory[]> {
-  if (!memoryRuntime || query.trim().length === 0) return [];
-  try {
-    return await memoryRuntime.recall(query, 5);
-  } catch {
-    return [];
-  }
-}
-
 // 格式化召回记忆, 并提醒模型只能把它当作偏好参考.
-// 调用网页检索器, 失败时降级为空上下文, 避免外部 MCP 影响本地聊天.
-async function retrieveWebResearch(
-  webRetriever: WebRetriever | undefined,
-  userText: string,
-  userTranscript: string
-): Promise<WebResearchContext | null> {
-  if (!webRetriever) return null;
-  try {
-    return await webRetriever.retrieve({ userText, userTranscript });
-  } catch (error) {
-    console.warn("[aiko:web-retriever] web research failed", {
-      name: error instanceof Error ? error.name : typeof error,
-      message: error instanceof Error ? error.message : String(error)
-    });
-    return null;
-  }
-}
-
-// 调用固定实时知识 provider, 失败时降级为空上下文, 避免外部 API 阻断聊天.
-async function retrieveCurrentKnowledge(
-  currentKnowledgeProvider: CurrentKnowledgeProvider | undefined,
-  userText: string,
-  userTranscript: string
-): Promise<CurrentKnowledgeContext | null> {
-  if (!currentKnowledgeProvider) return null;
-  try {
-    return await currentKnowledgeProvider.retrieve({ userText, userTranscript });
-  } catch (error) {
-    console.warn("[aiko:current-knowledge] retrieval failed", {
-      name: error instanceof Error ? error.name : typeof error,
-      message: error instanceof Error ? error.message : String(error)
-    });
-    return null;
-  }
-}
-
 export function formatMemoryContext(memories: RecalledMemory[]): string {
   if (memories.length === 0) return "";
   const lines = memories.map((memory, index) => `${index + 1}. [${memory.type}] ${memory.content}`);
