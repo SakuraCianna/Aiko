@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatPayload } from "../shared/chatPayload";
-import type { PendingActionDto, PanelName } from "../shared/ipcTypes";
+import type { AikoProactiveMessage, PendingActionDto, PanelName } from "../shared/ipcTypes";
 import type { CharacterBehavior, CharacterMotion } from "./character/characterTypes";
 import { ChatPanel } from "./components/ChatPanel";
 import { CommandInput } from "./components/CommandInput";
@@ -47,11 +47,13 @@ export function App() {
       setMessage((current) => (current === "正在思考..." ? delta.text : `${current}${delta.text}`));
       showControls();
     });
+    const unsubscribeProactiveMessages = window.aiko.onProactiveMessage(handleProactiveMessage);
 
     return () => {
       const activeRequestId = activeStreamIdRef.current;
       if (activeRequestId) void window.aiko.cancelStream(activeRequestId);
       unsubscribeStreamDeltas();
+      unsubscribeProactiveMessages();
       speechControllerRef.current?.cancel();
       speechControllerRef.current = null;
       clearHideControlsTimer();
@@ -63,6 +65,14 @@ export function App() {
   // 判断指定请求是否仍然是当前活跃的流式请求.
   function isActiveRequest(requestId: string) {
     return activeStreamIdRef.current === requestId;
+  }
+
+  // 展示主进程主动推送的陪伴消息, 不打断正在输出的用户请求.
+  function handleProactiveMessage(proactive: AikoProactiveMessage) {
+    if (activeStreamIdRef.current) return;
+    setMessage(proactive.message);
+    speakAiko(proactive.message, "idle", "speaking", "notice");
+    showControls();
   }
 
   // 发送用户输入到主进程 Agent, 并接收流式回复.

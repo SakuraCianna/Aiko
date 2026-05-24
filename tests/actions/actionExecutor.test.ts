@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createActionExecutor } from "../../src/main/actions/actionExecutor";
 import { createAikoActionJournal } from "../../src/main/agent/runtime/actionJournal";
+import { createAikoRuntimeHooks } from "../../src/main/agent/runtime/runtimeHooks";
 import type { PendingActionDto } from "../../src/shared/ipcTypes";
 
 describe("createActionExecutor", () => {
@@ -37,6 +38,41 @@ describe("createActionExecutor", () => {
         ok: true
       })
     ]);
+  });
+
+  it("emits runtime hooks around local action execution", async () => {
+    const hooks = createAikoRuntimeHooks();
+    const events: string[] = [];
+    hooks.on("before_tool_call", (event) => {
+      events.push(`before:${(event.payload as { phase?: string }).phase}`);
+    });
+    hooks.on("after_tool_call", (event) => {
+      events.push(`after:${(event.payload as { ok?: boolean }).ok}`);
+    });
+    const executor = createActionExecutor({
+      hooks,
+      now: () => new Date("2026-05-24T10:00:00.000Z"),
+      async openApplication() {
+        return false;
+      },
+      async openUrl() {
+        return;
+      }
+    });
+
+    await executor.execute({
+      remember: false,
+      action: {
+        id: "action_url",
+        title: "Open URL",
+        source: "test",
+        risk: "low",
+        capability: "open_url",
+        target: "https://example.com"
+      }
+    });
+
+    expect(events).toEqual(["before:execute", "after:true"]);
   });
 
   it("opens low-risk URLs through the injected capability", async () => {

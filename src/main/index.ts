@@ -2,7 +2,11 @@ import { app, type BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
+import { createAikoCommitmentHeartbeat } from "./agent/commitments/commitmentHeartbeat";
+import { createAikoCommitmentService } from "./agent/commitments/commitmentService";
+import { createCommitmentProactiveMessage } from "./agent/commitments/proactiveCommitment";
 import { createAikoActionJournal } from "./agent/runtime/actionJournal";
+import { createAikoRuntimeHooks } from "./agent/runtime/runtimeHooks";
 import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
@@ -20,6 +24,7 @@ import { resolvePreloadPath } from "./windows/preloadPath";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = resolvePreloadPath(__dirname);
 let database: AikoDatabase | null = null;
+let stopCommitmentHeartbeat: (() => void) | null = null;
 
 configureDevelopmentSessionData();
 
@@ -30,7 +35,9 @@ void app.whenReady().then(() => {
   database = openDatabase();
   const memoryRepository = createMemoryRepository(database.db);
   const actionJournal = createAikoActionJournal();
-  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository, actionJournal });
+  const commitmentService = createAikoCommitmentService();
+  const hooks = createAikoRuntimeHooks();
+  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository, actionJournal, commitmentService, hooks });
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
   const applicationPreferenceRepository = createApplicationPreferenceRepository(database.db);
@@ -42,6 +49,7 @@ void app.whenReady().then(() => {
   registerAikoHandlers({
     agentRuntime,
     actionJournal,
+    hooks,
     petWindow,
     panelWindow,
     memoryRepository,
@@ -49,6 +57,7 @@ void app.whenReady().then(() => {
     reminderRepository,
     applicationPreferenceRepository
   });
+  stopCommitmentHeartbeat = startCommitmentHeartbeat([petWindow, panelWindow], commitmentService);
 });
 
 app.on("window-all-closed", () => {
@@ -56,9 +65,43 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  stopCommitmentHeartbeat?.();
+  stopCommitmentHeartbeat = null;
   database?.close();
   database = null;
 });
+
+// 启动承诺心跳, 把到期 follow-up 转成渲染层主动消息.
+function startCommitmentHeartbeat(
+  windows: BrowserWindow[],
+  commitmentService: ReturnType<typeof createAikoCommitmentService>
+) {
+  const heartbeat = createAikoCommitmentHeartbeat({
+    commitmentService,
+    onDue(commitment) {
+      sendProactiveMessage(windows, createCommitmentProactiveMessage(commitment));
+    }
+  });
+  const interval = setInterval(() => {
+    void heartbeat.tick();
+  }, 60_000);
+  interval.unref?.();
+  void heartbeat.tick();
+
+  return () => clearInterval(interval);
+}
+
+// 安全广播主动消息, 窗口销毁或 IPC 发送失败都不影响主进程.
+function sendProactiveMessage(windows: BrowserWindow[], message: unknown) {
+  for (const win of windows) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send("aiko:proactive-message", message);
+    } catch {
+      continue;
+    }
+  }
+}
 
 // 开发模式下给 Chromium cache 使用独立目录, 避免多实例抢占 cache.
 function configureDevelopmentSessionData() {

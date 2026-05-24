@@ -1052,6 +1052,62 @@ describe("createAikoAgentRuntime", () => {
     expect(events[1]).toBe(events[0]!.replace("before:", "after:"));
   });
 
+  it("emits tool runtime hooks when a pending local action is planned", async () => {
+    const hooks = createAikoRuntimeHooks();
+    const events: Array<{ name: string; phase?: string; capability?: string; ok?: boolean }> = [];
+    hooks.on("before_tool_call", (event) => {
+      const payload = event.payload as { phase?: string; capability?: string };
+      events.push({ name: event.name, phase: payload.phase, capability: payload.capability });
+    });
+    hooks.on("after_tool_call", (event) => {
+      const payload = event.payload as { phase?: string; capability?: string; ok?: boolean };
+      events.push({ name: event.name, phase: payload.phase, capability: payload.capability, ok: payload.ok });
+    });
+    const runtime = createAikoAgentRuntime({
+      hooks,
+      agent: {
+        async invoke() {
+          throw new Error("deterministic action should not call the model");
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("https://example.com"));
+
+    expect(events).toEqual([
+      { name: "before_tool_call", phase: "plan", capability: "open_url" },
+      { name: "after_tool_call", phase: "plan", capability: "open_url", ok: true }
+    ]);
+  });
+
+  it("dispatches memory and commitment writes through internal workers", async () => {
+    const workerRuns: string[] = [];
+    const workerRegistry = {
+      register() {
+        return;
+      },
+      list() {
+        return [];
+      },
+      async run(name: string, input: unknown) {
+        workerRuns.push(`${name}:${typeof input}`);
+        return null;
+      }
+    };
+    const runtime = createAikoAgentRuntime({
+      workerRegistry,
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: "Noted." }] };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("I have an interview tomorrow."));
+
+    expect(workerRuns).toEqual(["memory_write_worker:object", "commitment_worker:object"]);
+  });
+
   it("advertises internal worker boundaries without exposing extra personas", () => {
     const runtime = createAikoAgentRuntime({
       agent: {
@@ -1061,10 +1117,12 @@ describe("createAikoAgentRuntime", () => {
       }
     });
 
-    expect(runtime.listWorkers()).toEqual([
+    expect(runtime.listWorkers()).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "memory_worker" }),
+      expect.objectContaining({ name: "memory_write_worker" }),
+      expect.objectContaining({ name: "commitment_worker" }),
       expect.objectContaining({ name: "action_journal_worker" })
-    ]);
+    ]));
   });
 });
 

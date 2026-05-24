@@ -56,6 +56,14 @@ export type ChatStreamDelta = {
   text: string;
 };
 
+export type AikoProactiveMessage = {
+  id: string;
+  kind: "commitment";
+  message: string;
+  commitmentId: string;
+  createdAt: string;
+};
+
 export type CursorState = {
   screenX: number;
   screenY: number;
@@ -126,6 +134,7 @@ export type AikoApi = {
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
+  onProactiveMessage: (listener: (message: AikoProactiveMessage) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
   cancelAction: (request: CancelActionRequest) => Promise<ExecuteActionResponse>;
   listConversation: () => Promise<ConversationSnapshotDto>;

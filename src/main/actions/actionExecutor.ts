@@ -19,12 +19,14 @@ import {
 } from "../reminders/reminderService";
 import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
+import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 
 export type ActionExecutorDeps = {
   openUrl: (url: string) => Promise<void>;
   openApplication: (query: string, expectedPath?: string) => Promise<boolean>;
   writeDesktopMarkdown?: DesktopMarkdownWriter;
   actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
+  hooks?: Pick<AikoRuntimeHooks, "emit">;
   now: () => Date;
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   permissionRepository?: Pick<
@@ -48,10 +50,19 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
 
       let result: ExecuteActionResponse;
       try {
+        await emitActionHook("before_tool_call", action, {
+          phase: "execute",
+          remember
+        });
         result = await executeSafely(action, remember);
       } catch {
         result = { ok: false, message: describeActionFailure(action, "execution_failed") };
       }
+      await emitActionHook("after_tool_call", action, {
+        phase: "execute",
+        remember,
+        ok: result.ok
+      });
       deps.actionJournal?.recordExecutionResult({ action, ...result });
       return result;
     },
@@ -265,6 +276,23 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     const defaultFor = readStringParam(action.params, "defaultFor");
     if (!defaultFor) return;
     deps.applicationPreferenceRepository.setDefaultApplication(defaultFor, action.target);
+  }
+
+  // 触发本地执行 hook, 让操作日志和未来 worker 能观察真实系统调用边界.
+  async function emitActionHook(
+    name: "before_tool_call" | "after_tool_call",
+    action: ExecuteActionRequest["action"],
+    payload: Record<string, unknown>
+  ) {
+    await deps.hooks?.emit({
+      name,
+      payload: {
+        ...payload,
+        capability: action.capability,
+        target: action.target,
+        actionId: action.id
+      }
+    });
   }
 }
 

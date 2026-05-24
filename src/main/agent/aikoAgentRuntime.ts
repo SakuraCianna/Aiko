@@ -246,7 +246,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const reviewPayload = readWorkflowInterruptPayload(workflowOutput);
       if (!reviewPayload) throw new Error("Aiko workflow interrupted without a pending action payload");
       approvalSessions.set(approvalThreadId, workflow);
-      const action = trackPendingAction(attachWorkflowApproval(reviewPayload.action, approvalThreadId), runId, "workflow");
+      const action = await trackPendingAction(attachWorkflowApproval(reviewPayload.action, approvalThreadId), runId, "workflow");
       emitDelta(reviewPayload.message);
       trace.add("executor.prepared", {
         capability: action.capability,
@@ -260,7 +260,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     throwIfAborted(signal);
     if (proposal.kind === "pending_actions") {
       const batchAction = createBatchAction(proposal.message, context.userTranscript, proposal.actions);
-      const approvedAction = trackPendingAction(
+      const approvedAction = await trackPendingAction(
         await preparePendingActionApproval(proposal.message, batchAction),
         runId,
         "executor.batch"
@@ -276,7 +276,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     if (proposal.kind === "pending_action") {
-      const action = trackPendingAction(proposal.action, runId, "executor");
+      const action = await trackPendingAction(proposal.action, runId, "executor");
       emitDelta(proposal.message);
       trace.add("executor.prepared", {
         capability: action.capability,
@@ -318,7 +318,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
       if (action) {
         const message = describeModelProposedAction(action);
-        const approvedAction = trackPendingAction(await preparePendingActionApproval(message, action), runId, "model.tool");
+        const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, action), runId, "model.tool");
         if (!assistantText) emitDelta(message);
         await rememberLongTermContext(context.userTranscript, assistantText || message, runId);
         trace.end({ mode: "tool_action" });
@@ -329,7 +329,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const markdownAction = createDesktopMarkdownAction(context.userTranscript || context.userText, assistantText, prefersDesktopMarkdown);
       if (markdownAction) {
         const message = describePendingAction(markdownAction);
-        const approvedAction = trackPendingAction(await preparePendingActionApproval(message, markdownAction), runId, "runtime.markdown");
+        const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, markdownAction), runId, "runtime.markdown");
         await rememberLongTermContext(context.userTranscript, assistantText, runId);
         trace.end({ mode: "markdown_action" });
         rememberConversationTurn(context.userTranscript, message);
@@ -528,21 +528,65 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   }
 
   // 给待确认动作补充 ID, 记录日志, 并把审批线程映射回运行生命周期.
-  function trackPendingAction(action: PendingActionDto, runId: string | undefined, source: string): PendingActionDto {
+  async function trackPendingAction(action: PendingActionDto, runId: string | undefined, source: string): Promise<PendingActionDto> {
+    await emitPlannedActionHook("before_tool_call", action, runId, source);
     const trackedAction = isAutoExecutableDesktopMarkdownAction(action)
       ? markAutoExecutableDesktopMarkdownAction(actionJournal.ensureActionId(action))
       : actionJournal.ensureActionId(action);
     actionJournal.recordPlanned({ runId, action: trackedAction, source });
     const threadId = trackedAction.approval?.threadId;
     if (threadId && runId) approvalThreadRuns.set(threadId, runId);
+    await emitPlannedActionHook("after_tool_call", trackedAction, runId, source, true);
     return trackedAction;
   }
 
   // 统一处理对话后的长期记忆和软承诺捕获.
   async function rememberLongTermContext(userTranscript: string, assistantText: string, runId?: string) {
-    await memoryAgent.rememberExchange(userTranscript, assistantText);
-    commitmentService.captureFromExchange(userTranscript, assistantText);
+    await runWorkerSafely("memory_write_worker", { userTranscript, assistantText });
+    await runWorkerSafely("commitment_worker", { userTranscript, assistantText });
     await hooks.emit({ name: "after_memory_write", runId, payload: { userTranscript } });
+  }
+
+  // 触发规划阶段 tool hook, 此时只生成待确认动作, 不直接执行系统调用.
+  async function emitPlannedActionHook(
+    name: "before_tool_call" | "after_tool_call",
+    action: PendingActionDto,
+    runId: string | undefined,
+    source: string,
+    ok?: boolean
+  ) {
+    await hooks.emit({
+      name,
+      runId,
+      payload: {
+        phase: "plan",
+        source,
+        capability: action.capability,
+        target: action.target,
+        actionId: action.id,
+        ...(ok === undefined ? {} : { ok })
+      }
+    });
+  }
+
+  // 内部 worker 是增强链路, 失败不能阻断 Aiko 对用户的主回复.
+  async function runWorkerSafely(name: string, input: unknown) {
+    try {
+      await workerRegistry.run(name, input);
+    } catch (error) {
+      console.warn("[aiko:worker] worker failed", { name, error: formatAgentErrorForLog(error) });
+    }
+  }
+
+  // 校验 worker 输入, 防止内部扩展误把未知对象写入记忆或承诺.
+  function readWorkerExchange(input: unknown): { userTranscript: string; assistantText: string } | null {
+    if (!input || typeof input !== "object") return null;
+    const record = input as { userTranscript?: unknown; assistantText?: unknown };
+    if (typeof record.userTranscript !== "string" || typeof record.assistantText !== "string") return null;
+    return {
+      userTranscript: record.userTranscript,
+      assistantText: record.assistantText
+    };
   }
 
   // 注册默认内部 worker 摘要, 对外仍然只呈现 Aiko 一个角色.
@@ -552,6 +596,24 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       description: "Selects and writes long-term companion memory.",
       async run(input) {
         return memoryAgent.recall(String(input ?? ""), 5);
+      }
+    });
+    registry.register({
+      name: "memory_write_worker",
+      description: "Writes accepted and pending long-term companion memory candidates.",
+      async run(input) {
+        const exchange = readWorkerExchange(input);
+        if (!exchange) return null;
+        return memoryAgent.rememberExchange(exchange.userTranscript, exchange.assistantText);
+      }
+    });
+    registry.register({
+      name: "commitment_worker",
+      description: "Captures soft follow-up commitments from conversation turns.",
+      run(input) {
+        const exchange = readWorkerExchange(input);
+        if (!exchange) return [];
+        return commitmentService.captureFromExchange(exchange.userTranscript, exchange.assistantText);
       }
     });
     registry.register({

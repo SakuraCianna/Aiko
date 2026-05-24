@@ -3,6 +3,7 @@ import { resolveOpenApplicationAction } from "../actions/applicationActionPolicy
 import { createActionExecutor } from "../actions/actionExecutor";
 import { isConversationResetRequest, type AikoAgentRuntime } from "../agent/aikoAgentRuntime";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
+import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 import { discoverApplications } from "../capabilities/applicationCatalog";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
@@ -27,6 +28,7 @@ import type {
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
   actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
+  hooks?: Pick<AikoRuntimeHooks, "emit">;
   petWindow: BrowserWindow;
   panelWindow: BrowserWindow;
   memoryRepository?: Pick<MemoryRepository, "listMemories" | "listPendingCandidates" | "acceptCandidate" | "rejectCandidate">;
@@ -55,6 +57,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     openApplication: (query, expectedPath) => openApplication(getApplications(), query, expectedPath),
     writeDesktopMarkdown,
     actionJournal: deps.actionJournal,
+    hooks: deps.hooks,
     now: () => new Date(),
     applicationPreferenceRepository: deps.applicationPreferenceRepository,
     permissionRepository: deps.permissionRepository,
