@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, screen, type WebContents } from "electron";
 import { resolveOpenApplicationAction } from "../actions/applicationActionPolicy";
 import { createActionExecutor } from "../actions/actionExecutor";
+import { isAutoExecutableDesktopMarkdownAction } from "../actions/localActionTrust";
 import { isConversationResetRequest, type AikoAgentRuntime } from "../agent/aikoAgentRuntime";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
@@ -8,7 +9,6 @@ import { discoverApplications } from "../capabilities/applicationCatalog";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
-import { isAutoExecutableDesktopMarkdownAction } from "./localActionPolicy";
 import type {
   ApplicationPreferenceRepository,
   MemoryRepository,

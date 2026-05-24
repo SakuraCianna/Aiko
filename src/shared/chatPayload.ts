@@ -122,11 +122,6 @@ export function isImageMimeType(mimeType: string): boolean {
   return (imageMimeTypes as readonly string[]).includes(mimeType);
 }
 
-// 判断 MIME 类型是否属于支持的音频类型.
-export function isAudioMimeType(mimeType: string): boolean {
-  return (audioMimeTypes as readonly string[]).includes(mimeType);
-}
-
 // 计算 base64 解码后的字节数, 非法输入返回 null.
 function decodedBase64ByteLength(base64: string): number | null {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0) return null;

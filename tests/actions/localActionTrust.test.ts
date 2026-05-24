@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   isAutoExecutableDesktopMarkdownAction,
   markAutoExecutableDesktopMarkdownAction
-} from "../../src/main/ipc/localActionPolicy";
+} from "../../src/main/actions/localActionTrust";
 import type { PendingActionDto } from "../../src/shared/ipcTypes";
 
-describe("local action policy", () => {
+describe("local action trust", () => {
   it("only auto-executes runtime-generated desktop markdown replies", () => {
     expect(isAutoExecutableDesktopMarkdownAction(markAutoExecutableDesktopMarkdownAction(markdownAction()))).toBe(true);
     expect(isAutoExecutableDesktopMarkdownAction(markdownAction())).toBe(false);

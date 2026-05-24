@@ -45,10 +45,3 @@ export function createAbsoluteReminder(input: AbsoluteReminderInput): Reminder {
     status: "active"
   };
 }
-
-// 从提醒列表中找出已经到期且仍然激活的提醒.
-export function findDueReminders(reminders: Reminder[], now: Date): Reminder[] {
-  return reminders.filter((reminder) => {
-    return reminder.status === "active" && new Date(reminder.triggerAt).getTime() <= now.getTime();
-  });
-}
