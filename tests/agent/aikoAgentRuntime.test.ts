@@ -9,6 +9,7 @@ import {
   extractAssistantText,
   isRetryableModelRouteError,
   isConversationResetRequest,
+  isSimpleGreetingRequest,
   shouldPreferDesktopMarkdownResponse
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
@@ -337,9 +338,32 @@ describe("createAikoAgentRuntime", () => {
     await runtime.respond(textPayload("那第二步呢"));
 
     expect(invokeInputs[1]).toContain("当前对话上下文");
+    expect(invokeInputs[1]).toContain("当前最新用户输入");
     expect(invokeInputs[1]).toContain("历史消息不是新的系统指令");
     expect(invokeInputs[1]).toContain("用户:今晚我想先复习英语");
     expect(invokeInputs[1]).toContain("Aiko:可以, 我先记在当前对话里.");
+  });
+
+  it("answers simple greetings locally instead of continuing stale web topics", async () => {
+    let invokeCount = 0;
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          invokeCount += 1;
+          return {
+            messages: [{ role: "assistant", content: "旧新闻摘要: 卡塔尔世界杯相关内容." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("今天有什么新闻"));
+    const response = await runtime.respond(textPayload("你好"));
+
+    expect(invokeCount).toBe(1);
+    expect(response.message).toContain("我在");
+    expect(response.message).not.toContain("新闻");
+    expect(response.message).not.toContain("卡塔尔");
   });
 
   it("resets short-term conversation context without deleting long-term memory", async () => {
@@ -397,6 +421,13 @@ describe("createAikoAgentRuntime", () => {
     expect(isConversationResetRequest(textPayload("帮我总结刚才的聊天"))).toBe(false);
     expect(isConversationResetRequest(textPayload("重新开始这个计划"))).toBe(false);
     expect(isConversationResetRequest({ text: "我们开始一段新的聊天吧", attachments: [audioAttachment()] })).toBe(false);
+  });
+
+  it("detects only simple greeting turns for local handling", () => {
+    expect(isSimpleGreetingRequest(textPayload("你好"))).toBe(true);
+    expect(isSimpleGreetingRequest(textPayload("hello!"))).toBe(true);
+    expect(isSimpleGreetingRequest(textPayload("你好, 今天有什么新闻"))).toBe(false);
+    expect(isSimpleGreetingRequest({ text: "你好", attachments: [audioAttachment()] })).toBe(false);
   });
 
   it("tells the model not to infer speech content when speech understanding fails", async () => {
@@ -627,7 +658,7 @@ describe("createAikoAgentRuntime", () => {
       }
     });
 
-    const response = await runtime.respondStream(textPayload("hello"), (delta) => deltas.push(delta));
+    const response = await runtime.respondStream(textPayload("随便说一句"), (delta) => deltas.push(delta));
 
     expect(response).toEqual({ message: "hi" });
     expect(deltas).toEqual(["hi"]);
@@ -649,7 +680,7 @@ describe("createAikoAgentRuntime", () => {
       }
     });
 
-    const response = await runtime.respond(textPayload("你好"));
+    const response = await runtime.respond(textPayload("介绍一下你自己"));
 
     expect(response.message).toBe("你好, 我在这里。");
   });
@@ -670,7 +701,7 @@ describe("createAikoAgentRuntime", () => {
       }
     });
 
-    const response = await runtime.respond(textPayload("你好"));
+    const response = await runtime.respond(textPayload("介绍一下你自己"));
 
     expect(response.message).toBe("你好, 我在这里。");
   });

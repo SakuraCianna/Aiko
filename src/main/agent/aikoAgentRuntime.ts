@@ -139,6 +139,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       return { message };
     }
 
+    if (isSimpleGreetingRequest(payload)) {
+      const message = createSimpleGreetingReply();
+      emitDelta(message);
+      rememberConversationTurn(payload.text, message);
+      return { message };
+    }
+
     const trace = traceRecorder.start();
     const context = await retriever.retrieve(payload);
     throwIfAborted(signal);
@@ -247,10 +254,10 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   // 将当前短期上下文注入模型输入, 不影响长期记忆.
   function withConversationContext(userContent: AgentUserContent): AgentUserContent {
     const contextText = formatConversationContext(conversationMessages, maxConversationContextChars);
-    if (!contextText) return userContent;
+    const latestInputLabel = "当前最新用户输入(只回应这一轮; 如果只是寒暄, 不要延续旧任务):";
 
     if (typeof userContent === "string") {
-      return [contextText, userContent].join("\n\n");
+      return [contextText, latestInputLabel, userContent].filter(Boolean).join("\n\n");
     }
 
     const [firstPart, ...otherParts] = userContent;
@@ -258,13 +265,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       return [
         {
           ...firstPart,
-          text: [contextText, firstPart.text].filter(Boolean).join("\n\n")
+          text: [contextText, latestInputLabel, firstPart.text].filter(Boolean).join("\n\n")
         },
         ...otherParts
       ];
     }
 
-    return [{ type: "text", text: contextText }, ...userContent];
+    return [{ type: "text", text: [contextText, latestInputLabel].filter(Boolean).join("\n\n") }, ...userContent];
   }
 
   // 把一轮用户输入和 Aiko 回复写入短期上下文.
@@ -360,6 +367,28 @@ export function isConversationResetRequest(payload: ChatPayload): boolean {
     || /(?:重新开始|从头开始|另起|重开).{0,8}(?:聊|聊天|对话|话题)/.test(text)
     || /(?:换个|换一个|换段|换一段)新的?(?:话题|聊天|对话)/.test(text)
   );
+}
+
+// 判断是否是单纯寒暄, 命中时走本地回复, 避免旧上下文把模型带回上一轮任务.
+export function isSimpleGreetingRequest(payload: ChatPayload): boolean {
+  if (payload.attachments.length > 0) return false;
+  const text = normalizeSimpleGreetingText(payload.text);
+  if (!text) return false;
+
+  return /^(?:你好|您好|嗨|哈喽|hello|hi|hey|早上好|上午好|中午好|下午好|晚上好|在吗|在不在|喂)$/.test(text);
+}
+
+// 生成稳定的本地寒暄回复, 不触发模型和外部检索.
+function createSimpleGreetingReply(): string {
+  return "嗯, 我在。你先说, 我会跟上。";
+}
+
+// 归一化寒暄文本, 只保留可用于精确匹配的主体.
+function normalizeSimpleGreetingText(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[。.!！?？，,、；;：:\s~～]+/g, "");
 }
 
 // 归一化新会话意图文本, 去掉语气词和标点以提高自然表达命中率.

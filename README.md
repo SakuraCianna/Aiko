@@ -126,7 +126,7 @@ src/renderer/App.tsx                桌宠主界面
 src/renderer/components/            输入框, 面板, 确认框等 UI 组件
 src/renderer/character/             VRM 角色渲染器
 人物设定.md                         Aiko 的角色人格和提示词设定
-人物UI.md                           角色 UI 和人物模型路线说明
+docs/人物UI.md                      角色 UI 和人物模型路线说明
 ```
 
 ## Agent 架构
