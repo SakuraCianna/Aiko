@@ -46,6 +46,10 @@ describe("Aiko persona prompt", () => {
     expect(prompt).toContain("温和,敏锐");
     expect(prompt).toContain("不要替用户继续写台词");
     expect(prompt).toContain("不要输出以 用户: 或 Aiko: 开头的多轮剧本");
+    expect(prompt).toContain("指令性操作 few-shot");
+    expect(prompt).toContain("propose_open_application");
+    expect(prompt).toContain("连续调用多个 propose_* 工具");
+    expect(prompt).toContain("不要输出自造 JSON");
   });
 });
 
