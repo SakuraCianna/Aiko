@@ -118,6 +118,46 @@ describe("createTavilyWebSearchProvider", () => {
     ]);
   });
 
+  it("rotates to the next Tavily API key when MCP tool loading fails", async () => {
+    const close = vi.fn(async () => undefined);
+    const invoke = vi.fn(async () => ({
+      results: [
+        {
+          title: "Loaded with fallback key",
+          url: "https://example.com/tool-load-fallback",
+          content: "The second key loaded MCP tools successfully."
+        }
+      ]
+    }));
+    const createClient = vi
+      .fn()
+      .mockReturnValueOnce({
+        async getTools() {
+          throw new Error("429 tool load rate limit");
+        },
+        close
+      } satisfies McpClientLike)
+      .mockReturnValueOnce(fakeClient([{ name: "tavily-search", invoke }]));
+    const provider = createTavilyWebSearchProvider(tavilyConfig({ apiKeys: ["tvly-1", "tvly-2"] }), {
+      createClient
+    });
+
+    const results = await provider.search("LangChain MCP");
+
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(createClient.mock.calls[0]?.[0])).toContain("tvly-1");
+    expect(JSON.stringify(createClient.mock.calls[1]?.[0])).toContain("tvly-2");
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(results).toEqual([
+      {
+        title: "Loaded with fallback key",
+        url: "https://example.com/tool-load-fallback",
+        snippet: "The second key loaded MCP tools successfully.",
+        source: "tavily-mcp"
+      }
+    ]);
+  });
+
   it("returns an empty result instead of throwing when the Tavily search tool is unavailable", async () => {
     const provider = createTavilyWebSearchProvider(tavilyConfig(), {
       createClient: () => fakeClient([{ name: "other-tool", invoke: async () => "unused" }])

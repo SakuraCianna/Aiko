@@ -61,13 +61,15 @@ export function createTavilyWebSearchProvider(
     // 懒加载 MCP 工具, 避免桌宠启动时因为网络或 npx 初始化阻塞界面.
     async search(query: string, searchOptions: WebSearchOptions = {}) {
       for (let attempt = 0; attempt < Math.max(apiKeys.length, 1); attempt += 1) {
-        const searchTool = await loadSearchTool();
-        if (!searchTool) {
-          console.warn("[aiko:mcp] Tavily search tool unavailable");
-          return [];
-        }
-
         try {
+          const searchTool = await loadSearchTool();
+          if (!searchTool) {
+            console.warn("[aiko:mcp] Tavily search tool unavailable", { keyIndex: activeKeyIndex + 1 });
+            if (!canRotateKey(attempt)) return [];
+            await rotateToNextKey();
+            continue;
+          }
+
           const output = await searchTool.invoke(
             {
               query,

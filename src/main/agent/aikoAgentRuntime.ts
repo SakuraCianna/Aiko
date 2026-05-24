@@ -849,7 +849,7 @@ async function invokeWithModelRoute<T>(
 }
 
 // 流式调用同样按模型路由兜底, 避免主模型限流时直接进入兜底文案.
-async function* streamWithModelRoute(
+export async function* streamWithModelRoute(
   modelRoute: string[],
   streamAttempt: (modelName: string, attemptActions: PendingActionDto[]) => Promise<AsyncIterable<unknown>> | AsyncIterable<unknown>,
   proposedActions: PendingActionDto[]
@@ -858,12 +858,17 @@ async function* streamWithModelRoute(
 
   for (const [index, modelName] of modelRoute.entries()) {
     const attemptActions: PendingActionDto[] = [];
+    const bufferedChunks: unknown[] = [];
     try {
       const stream = await streamAttempt(modelName, attemptActions);
       for await (const chunk of stream) {
-        yield chunk;
+        // 路由流先在当前模型尝试内缓冲, 避免主模型半途失败后把半截内容和备用模型内容混在一起.
+        bufferedChunks.push(chunk);
       }
       proposedActions.push(...attemptActions);
+      for (const chunk of bufferedChunks) {
+        yield chunk;
+      }
       return;
     } catch (error) {
       lastError = error;

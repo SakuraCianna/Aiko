@@ -166,7 +166,9 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action));
+    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action), {
+      preserveThreadId: pendingEntry.action.approval?.threadId
+    });
     return executeApprovedAction(pendingEntry.action, request.remember);
   });
 
@@ -187,7 +189,9 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
-    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action));
+    discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action), {
+      preserveThreadId: pendingEntry.action.approval?.threadId
+    });
     const approval = await deps.agentRuntime.resumePendingActionApproval(pendingEntry.action, {
       type: "reject",
       reason: request.reason ?? "user_cancelled"
@@ -431,8 +435,10 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   }
 
   // 批量丢弃不再可见的审批动作, 避免用户无法确认的 action 继续占用会话.
-  function discardPendingActionApprovals(entries: PendingActionEntry[]) {
+  function discardPendingActionApprovals(entries: PendingActionEntry[], options: { preserveThreadId?: string } = {}) {
     for (const entry of entries) {
+      // 同一候选组共享一个 LangGraph 审批线程, 不能在恢复当前选择前丢弃这个线程.
+      if (entry.action.approval?.threadId && entry.action.approval.threadId === options.preserveThreadId) continue;
       deps.agentRuntime.discardPendingActionApproval(entry.action);
     }
   }

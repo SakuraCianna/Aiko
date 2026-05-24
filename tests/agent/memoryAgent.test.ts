@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAikoMemoryAgent } from "../../src/main/agent/subagents/memoryAgent";
 import type { MemoryCandidate, MemoryStatus } from "../../src/main/memory/memoryTypes";
 
@@ -116,5 +116,34 @@ describe("createAikoMemoryAgent", () => {
     await expect(memoryAgent.rememberExchange("hello", "reply")).resolves.toBeUndefined();
     await expect(memoryAgent.rememberExchange("   ", "reply")).resolves.toBeUndefined();
     expect(calls).toBe(0);
+  });
+
+  it("logs sanitized memory write failures for diagnosis", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const memoryAgent = createAikoMemoryAgent({
+      memoryRuntime: {
+        async recall() {
+          return [];
+        },
+        async rememberCandidate() {
+          throw new Error("should not persist");
+        }
+      },
+      async memoryCandidateExtractor() {
+        throw new Error("invalid json with Bearer secret-memory-token");
+      }
+    });
+
+    try {
+      await expect(memoryAgent.rememberExchange("call me Sakura", "got it")).resolves.toBeUndefined();
+
+      expect(consoleWarn).toHaveBeenCalledTimes(1);
+      const serialized = JSON.stringify(consoleWarn.mock.calls[0]);
+      expect(serialized).toContain("[aiko:memory]");
+      expect(serialized).toContain("invalid json");
+      expect(serialized).not.toContain("secret-memory-token");
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });

@@ -37,7 +37,8 @@ export function createAikoMemoryAgent(options: AikoMemoryAgentOptions = {}): Aik
         for (const candidate of dedupeCandidates(candidates)) {
           await options.memoryRuntime.rememberCandidate(candidate, classifyMemoryCandidate(candidate));
         }
-      } catch {
+      } catch (error) {
+        logMemoryAgentFailure("remember_exchange", error);
         return;
       }
     }
@@ -59,4 +60,28 @@ function dedupeCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
     }
   }
   return [...byKey.values()];
+}
+
+// 记录记忆子 Agent 的可诊断失败, 同时避免把密钥或请求头写进日志.
+function logMemoryAgentFailure(phase: string, error: unknown) {
+  console.warn("[aiko:memory] memory agent failed", {
+    phase,
+    error: formatMemoryAgentError(error)
+  });
+}
+
+// 只保留错误类型和脱敏后的 message, 方便定位坏 JSON 或数据库写入失败.
+function formatMemoryAgentError(error: unknown) {
+  return {
+    name: error instanceof Error ? error.name : typeof error,
+    message: sanitizeMemoryDiagnosticText(error instanceof Error ? error.message : String(error))
+  };
+}
+
+// 对常见密钥形态做脱敏, 防止测试日志和用户日志泄露凭据.
+function sanitizeMemoryDiagnosticText(text: string) {
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
+    .replace(/sk-[A-Za-z0-9._-]+/gi, "sk-[redacted]")
+    .replace(/[A-Za-z0-9]{24,}\.[A-Za-z0-9._-]{8,}/g, "[redacted-api-key]");
 }

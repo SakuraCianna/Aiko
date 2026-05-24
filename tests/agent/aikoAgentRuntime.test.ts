@@ -10,7 +10,8 @@ import {
   isRetryableModelRouteError,
   isConversationResetRequest,
   isSimpleGreetingRequest,
-  shouldPreferDesktopMarkdownResponse
+  shouldPreferDesktopMarkdownResponse,
+  streamWithModelRoute
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoCommitmentService } from "../../src/main/agent/commitments/commitmentService";
 import { createAikoActionJournal } from "../../src/main/agent/runtime/actionJournal";
@@ -740,6 +741,29 @@ describe("createAikoAgentRuntime", () => {
 
     expect(response).toEqual({ message: "好的,我来安排." });
     expect(deltas).toEqual(["好的", ",我来安排."]);
+  });
+
+  it("does not leak partial chunks from a failed streamed model route attempt", async () => {
+    const chunks: string[] = [];
+
+    async function* failingPrimaryStream() {
+      yield { messages: [{ role: "assistant", content: "主模型输出了一半" }] };
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    }
+
+    async function* fallbackStream() {
+      yield { messages: [{ role: "assistant", content: "备用模型完整回复" }] };
+    }
+
+    for await (const chunk of streamWithModelRoute(
+      ["primary-model", "fallback-model"],
+      (modelName) => modelName === "primary-model" ? failingPrimaryStream() : fallbackStream(),
+      []
+    )) {
+      chunks.push(extractAssistantText(chunk, { streaming: true }));
+    }
+
+    expect(chunks).toEqual(["备用模型完整回复"]);
   });
 
   it("does not leak partial roleplay labels while streaming", async () => {
