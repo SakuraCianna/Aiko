@@ -269,6 +269,9 @@ describe("createAikoAgentRuntime", () => {
     expect(traceRecorder.list()[0]?.events.map((event) => event.name)).toEqual([
       "retriever.completed",
       "planner.completed",
+      "model_generate.completed",
+      "postprocess.completed",
+      "memory_commit.completed",
       "agent.completed",
       "request.completed"
     ]);

@@ -86,9 +86,13 @@ describe("Aiko agent architecture boundary", () => {
 
   it("resumes workflow approval before executing local actions", () => {
     const ipcHandlers = readFileSync("src/main/ipc/handlers.ts", "utf8");
+    const graphWorkflow = readFileSync("src/main/agent/graph/aikoAgentWorkflow.ts", "utf8");
 
+    expect(ipcHandlers).toContain("createAikoActionExecutionWorkflow");
     expect(ipcHandlers).toContain("resumePendingActionApproval(action, { type: \"approve\" })");
-    expect(ipcHandlers).toContain("return actionExecutor.execute({ action, remember })");
+    expect(ipcHandlers).toContain("execute: () => actionExecutor.execute({ action, remember })");
+    expect(graphWorkflow).toContain("task(\"approval_resume\"");
+    expect(graphWorkflow).toContain("task(\"tool_execute\"");
   });
 
   it("rejects workflow approval when a pending local action is cancelled", () => {

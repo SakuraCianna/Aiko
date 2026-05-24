@@ -1,7 +1,7 @@
 import { Command, MemorySaver, entrypoint, interrupt, task } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import type { ChatPayload } from "../../../shared/chatPayload";
-import type { PendingActionDto } from "../../../shared/ipcTypes";
+import type { ExecuteActionResponse, PendingActionDto } from "../../../shared/ipcTypes";
 import type { AikoPlan, ExecutionProposal, RetrievedContext } from "../types";
 
 export type AikoAgentWorkflowDeps = {
@@ -21,6 +21,8 @@ export type AikoAgentWorkflowResult = {
 };
 
 export type AikoAgentWorkflowStepName = "retrieve" | "plan" | "prepare" | "review";
+export type AikoModelResponseWorkflowStepName = "model_generate" | "postprocess" | "memory_commit";
+export type AikoActionExecutionWorkflowStepName = "approval_resume" | "tool_execute";
 
 export type AikoAgentWorkflowApprovalMode = "passive" | "interrupt";
 
@@ -98,6 +100,37 @@ export type AikoActionApprovalWorkflow = {
   ) => Promise<AikoActionApprovalWorkflowOutput>;
 };
 
+export type AikoModelResponseWorkflowDeps<ModelResult, Outcome> = {
+  generate: () => Promise<ModelResult>;
+  postprocess: (result: ModelResult) => Promise<Outcome>;
+  commitMemory: (outcome: Outcome) => Promise<void>;
+  checkpointer?: BaseCheckpointSaver;
+};
+
+export type AikoModelResponseWorkflowResult<Outcome> = {
+  outcome: Outcome;
+  stepNames: AikoModelResponseWorkflowStepName[];
+};
+
+export type AikoModelResponseWorkflow<Outcome> = {
+  invoke: () => Promise<AikoModelResponseWorkflowResult<Outcome>>;
+};
+
+export type AikoActionExecutionWorkflowDeps = {
+  resumeApproval: () => Promise<ExecuteActionResponse>;
+  execute: () => Promise<ExecuteActionResponse>;
+  checkpointer?: BaseCheckpointSaver;
+};
+
+export type AikoActionExecutionWorkflowResult = {
+  response: ExecuteActionResponse;
+  stepNames: AikoActionExecutionWorkflowStepName[];
+};
+
+export type AikoActionExecutionWorkflow = {
+  invoke: () => Promise<AikoActionExecutionWorkflowResult>;
+};
+
 export function createAikoAgentWorkflow(deps: AikoAgentWorkflowDeps): AikoAgentWorkflow {
   const approvalMode = deps.approvalMode ?? "passive";
   const checkpointer = approvalMode === "interrupt" ? deps.checkpointer ?? new MemorySaver() : deps.checkpointer;
@@ -144,6 +177,77 @@ export function createAikoAgentWorkflow(deps: AikoAgentWorkflowDeps): AikoAgentW
     async resume(decision, options) {
       const result = await workflow.invoke(new Command({ resume: decision }), createWorkflowConfig(approvalMode, options));
       return result as AikoAgentWorkflowOutput;
+    }
+  };
+}
+
+// 创建本地动作执行工作流, 保证审批恢复成功后才触发系统能力.
+export function createAikoActionExecutionWorkflow(
+  deps: AikoActionExecutionWorkflowDeps
+): AikoActionExecutionWorkflow {
+  const resumeApproval = task("approval_resume", async () => {
+    return deps.resumeApproval();
+  });
+
+  const executeTool = task("tool_execute", async () => {
+    return deps.execute();
+  });
+
+  const workflow = entrypoint(createEntrypointOptions("aikoActionExecutionWorkflow", deps.checkpointer), async () => {
+    const approval = await resumeApproval();
+    if (!approval.ok) {
+      return {
+        response: approval,
+        stepNames: ["approval_resume"] satisfies AikoActionExecutionWorkflowStepName[]
+      };
+    }
+
+    return {
+      response: await executeTool(),
+      stepNames: ["approval_resume", "tool_execute"] satisfies AikoActionExecutionWorkflowStepName[]
+    };
+  });
+
+  return {
+    // 内部执行流同样用非空输入启动, 满足 LangGraph entrypoint 的输入写入要求.
+    async invoke() {
+      return await workflow.invoke({});
+    }
+  };
+}
+
+// 创建模型回复工作流, 把生成, 后处理和记忆提交变成显式 LangGraph task.
+export function createAikoModelResponseWorkflow<ModelResult, Outcome>(
+  deps: AikoModelResponseWorkflowDeps<ModelResult, Outcome>
+): AikoModelResponseWorkflow<Outcome> {
+  const generateModel = task("model_generate", async () => {
+    return deps.generate();
+  });
+
+  const postprocessResponse = task("postprocess", async (result: ModelResult) => {
+    return deps.postprocess(result);
+  });
+
+  const commitMemory = task("memory_commit", async (outcome: Outcome) => {
+    await deps.commitMemory(outcome);
+    return outcome;
+  });
+
+  const workflow = entrypoint(createEntrypointOptions("aikoModelResponseWorkflow", deps.checkpointer), async () => {
+    const modelResult = await generateModel();
+    const outcome = await postprocessResponse(modelResult);
+    await commitMemory(outcome);
+
+    return {
+      outcome,
+      stepNames: ["model_generate", "postprocess", "memory_commit"] satisfies AikoModelResponseWorkflowStepName[]
+    };
+  });
+
+  return {
+    // 模型回复链路没有用户审批 interrupt, 但保留 Functional API 边界方便后续 checkpoint 化.
+    async invoke() {
+      return await workflow.invoke({});
     }
   };
 }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { MemorySaver } from "@langchain/langgraph";
 import {
+  createAikoActionExecutionWorkflow,
   createAikoAgentWorkflow,
+  createAikoModelResponseWorkflow,
   isAikoAgentWorkflowInterrupted
 } from "../../src/main/agent/graph/aikoAgentWorkflow";
 import type { PendingActionDto } from "../../src/shared/ipcTypes";
@@ -142,6 +144,87 @@ describe("createAikoAgentWorkflow", () => {
       decision: {
         type: "approve"
       }
+    });
+  });
+});
+
+describe("createAikoModelResponseWorkflow", () => {
+  it("runs model generation, postprocessing, and memory commit in order", async () => {
+    const calls: string[] = [];
+    const workflow = createAikoModelResponseWorkflow<string, { message: string }>({
+      async generate() {
+        calls.push("model_generate");
+        return "raw assistant result";
+      },
+      async postprocess(raw) {
+        calls.push(`postprocess:${raw}`);
+        return {
+          message: "整理后的回复"
+        };
+      },
+      async commitMemory(outcome) {
+        calls.push(`memory_commit:${outcome.message}`);
+      }
+    });
+
+    const result = await workflow.invoke();
+
+    expect(calls).toEqual([
+      "model_generate",
+      "postprocess:raw assistant result",
+      "memory_commit:整理后的回复"
+    ]);
+    expect(result).toEqual({
+      outcome: {
+        message: "整理后的回复"
+      },
+      stepNames: ["model_generate", "postprocess", "memory_commit"]
+    });
+  });
+});
+
+describe("createAikoActionExecutionWorkflow", () => {
+  it("resumes approval before executing the local action", async () => {
+    const calls: string[] = [];
+    const workflow = createAikoActionExecutionWorkflow({
+      async resumeApproval() {
+        calls.push("approval_resume");
+        return { ok: true, message: "approved" };
+      },
+      async execute() {
+        calls.push("tool_execute");
+        return { ok: true, message: "opened" };
+      }
+    });
+
+    const result = await workflow.invoke();
+
+    expect(calls).toEqual(["approval_resume", "tool_execute"]);
+    expect(result).toEqual({
+      response: { ok: true, message: "opened" },
+      stepNames: ["approval_resume", "tool_execute"]
+    });
+  });
+
+  it("does not execute the local action when approval resume fails", async () => {
+    const calls: string[] = [];
+    const workflow = createAikoActionExecutionWorkflow({
+      async resumeApproval() {
+        calls.push("approval_resume");
+        return { ok: false, message: "expired" };
+      },
+      async execute() {
+        calls.push("tool_execute");
+        return { ok: true, message: "opened" };
+      }
+    });
+
+    const result = await workflow.invoke();
+
+    expect(calls).toEqual(["approval_resume"]);
+    expect(result).toEqual({
+      response: { ok: false, message: "expired" },
+      stepNames: ["approval_resume"]
     });
   });
 });

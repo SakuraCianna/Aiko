@@ -3,6 +3,7 @@ import { resolveOpenApplicationAction } from "../actions/applicationActionPolicy
 import { createActionExecutor } from "../actions/actionExecutor";
 import { isAutoExecutableDesktopMarkdownAction } from "../actions/localActionTrust";
 import { isConversationResetRequest, type AikoAgentRuntime } from "../agent/aikoAgentRuntime";
+import { createAikoActionExecutionWorkflow } from "../agent/graph/aikoAgentWorkflow";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 import { discoverApplications } from "../capabilities/applicationCatalog";
@@ -415,9 +416,12 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
 
   // 在真正调用本地能力前先恢复 LangGraph 审批, 保证自动授权路径也不会绕过工作流.
   async function executeApprovedAction(action: PendingActionDto, remember: boolean) {
-    const approval = await deps.agentRuntime.resumePendingActionApproval(action, { type: "approve" });
-    if (!approval.ok) return approval;
-    return actionExecutor.execute({ action, remember });
+    const workflow = createAikoActionExecutionWorkflow({
+      resumeApproval: () => deps.agentRuntime.resumePendingActionApproval(action, { type: "approve" }),
+      execute: () => actionExecutor.execute({ action, remember })
+    });
+    const result = await workflow.invoke();
+    return result.response;
   }
 
   // 保存一个待确认动作并分配一次性确认令牌.

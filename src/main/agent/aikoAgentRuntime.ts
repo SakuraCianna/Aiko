@@ -28,6 +28,7 @@ import type { AikoCommitment, AikoCommitmentService } from "./commitments/commit
 import {
   createAikoActionApprovalWorkflow,
   createAikoAgentWorkflow,
+  createAikoModelResponseWorkflow,
   isAikoAgentWorkflowInterrupted,
   type AikoActionApprovalWorkflow,
   type AikoAgentWorkflow,
@@ -53,7 +54,7 @@ import { createAikoMemoryAgent } from "./subagents/memoryAgent";
 import type { AikoMemoryAgent, MemoryCandidateExtractor } from "./subagents/memoryAgent";
 import { createDefaultToolRegistry } from "./tools/toolRegistry";
 import { createAikoTraceRecorder } from "./trace/aikoTrace";
-import type { AgentUserContent, AikoMemoryRuntime } from "./types";
+import type { AgentUserContent, AikoMemoryRuntime, RetrievedContext } from "./types";
 import type { AikoTraceRecorder } from "./trace/aikoTrace";
 import type { WebRetriever } from "./retriever/webRetriever";
 import { createAikoWorkerRegistry } from "./workers/workerRegistry";
@@ -65,6 +66,25 @@ type AgentInvokeOptions = Parameters<LangChainAgent["invoke"]>[1];
 type AgentStreamOptions = Parameters<LangChainAgent["stream"]>[1];
 type AssistantTextExtractionOptions = {
   streaming?: boolean;
+};
+type AikoModelResponseMode = "tool_action" | "markdown_action" | "chat";
+type AikoModelResponseOutcome = {
+  response: ChatResponse;
+  mode: AikoModelResponseMode;
+  memoryText: string;
+  conversationText: string;
+  traceData: {
+    hasText: boolean;
+    hasAction: boolean;
+  };
+};
+type AikoModelPostprocessInput = {
+  context: RetrievedContext;
+  proposedActions: PendingActionDto[];
+  prefersDesktopMarkdown: boolean;
+  emitDelta: (text: string) => void;
+  signal?: AbortSignal;
+  runId?: string;
 };
 
 export const AIKO_CHAT_TEMPERATURE = 0.3;
@@ -302,46 +322,44 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         messages: [new HumanMessage({ content: withConversationContext(context.userContent) })]
       };
       const prefersDesktopMarkdown = shouldPreferDesktopMarkdownResponse(context.userText, context.userTranscript);
-      await hooks.emit({ name: "before_model_call", runId, payload: { userText: context.userText } });
-      const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
-      await hooks.emit({ name: "after_model_call", runId, payload: { ok: true } });
-      throwIfAborted(signal);
-      const assistantText = extractAssistantText(result);
-      const action = proposedActions.length > 1
-        ? createBatchAction(`我拆成 ${proposedActions.length} 个动作, 等你确认后按顺序执行.`, context.userTranscript, proposedActions)
-        : proposedActions.at(-1);
-      trace.add("agent.completed", {
-        hasText: assistantText.length > 0,
-        hasAction: Boolean(action)
+      const modelWorkflow = createAikoModelResponseWorkflow<unknown, AikoModelResponseOutcome>({
+        async generate() {
+          await hooks.emit({ name: "before_model_call", runId, payload: { userText: context.userText } });
+          const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
+          await hooks.emit({ name: "after_model_call", runId, payload: { ok: true } });
+          throwIfAborted(signal);
+          trace.add("model_generate.completed", {
+            streaming: Boolean(onDelta && !prefersDesktopMarkdown)
+          });
+          return result;
+        },
+        async postprocess(result) {
+          const outcome = await postprocessModelResponse(result, {
+            context,
+            proposedActions,
+            prefersDesktopMarkdown,
+            emitDelta,
+            signal,
+            runId
+          });
+          trace.add("postprocess.completed", {
+            mode: outcome.mode,
+            hasAction: Boolean(outcome.response.pendingAction)
+          });
+          return outcome;
+        },
+        async commitMemory(outcome) {
+          await rememberLongTermContext(context.userTranscript, outcome.memoryText, runId);
+          trace.add("memory_commit.completed", {
+            mode: outcome.mode
+          });
+        }
       });
-
-      // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
-      if (action) {
-        const message = describeModelProposedAction(action);
-        const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, action), runId, "model.tool");
-        if (!assistantText) emitDelta(message);
-        await rememberLongTermContext(context.userTranscript, assistantText || message, runId);
-        trace.end({ mode: "tool_action" });
-        rememberConversationTurn(context.userTranscript, assistantText || message);
-        return respondWithAction(message, approvedAction);
-      }
-
-      const markdownAction = createDesktopMarkdownAction(context.userTranscript || context.userText, assistantText, prefersDesktopMarkdown);
-      if (markdownAction) {
-        const message = describePendingAction(markdownAction);
-        const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, markdownAction), runId, "runtime.markdown");
-        await rememberLongTermContext(context.userTranscript, assistantText, runId);
-        trace.end({ mode: "markdown_action" });
-        rememberConversationTurn(context.userTranscript, message);
-        return respondWithAction(message, approvedAction);
-      }
-
-      const message = assistantText || describeEmptyAssistantReply();
-      if (!assistantText) emitDelta(message);
-      await rememberLongTermContext(context.userTranscript, message, runId);
-      trace.end({ mode: "chat" });
-      rememberConversationTurn(context.userTranscript, message);
-      return { message };
+      const { outcome } = await modelWorkflow.invoke();
+      trace.add("agent.completed", outcome.traceData);
+      trace.end({ mode: outcome.mode });
+      rememberConversationTurn(context.userTranscript, outcome.conversationText);
+      return outcome.response;
     } catch (error) {
       if (isAbortError(error)) {
         trace.add("agent.cancelled");
@@ -545,6 +563,63 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     await runWorkerSafely("memory_write_worker", { userTranscript, assistantText });
     await runWorkerSafely("commitment_worker", { userTranscript, assistantText });
     await hooks.emit({ name: "after_memory_write", runId, payload: { userTranscript } });
+  }
+
+  // 把模型原始结果归一成最终 ChatResponse, 同时只生成待确认动作而不直接执行系统调用.
+  async function postprocessModelResponse(
+    result: unknown,
+    input: AikoModelPostprocessInput
+  ): Promise<AikoModelResponseOutcome> {
+    throwIfAborted(input.signal);
+    const assistantText = extractAssistantText(result);
+    const action = input.proposedActions.length > 1
+      ? createBatchAction(`我拆成 ${input.proposedActions.length} 个动作, 等你确认后按顺序执行.`, input.context.userTranscript, input.proposedActions)
+      : input.proposedActions.at(-1);
+    const traceData = {
+      hasText: assistantText.length > 0,
+      hasAction: Boolean(action)
+    };
+
+    // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
+    if (action) {
+      const message = describeModelProposedAction(action);
+      const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, action), input.runId, "model.tool");
+      if (!assistantText) input.emitDelta(message);
+      return {
+        response: respondWithAction(message, approvedAction),
+        mode: "tool_action",
+        memoryText: assistantText || message,
+        conversationText: assistantText || message,
+        traceData
+      };
+    }
+
+    const markdownAction = createDesktopMarkdownAction(
+      input.context.userTranscript || input.context.userText,
+      assistantText,
+      input.prefersDesktopMarkdown
+    );
+    if (markdownAction) {
+      const message = describePendingAction(markdownAction);
+      const approvedAction = await trackPendingAction(await preparePendingActionApproval(message, markdownAction), input.runId, "runtime.markdown");
+      return {
+        response: respondWithAction(message, approvedAction),
+        mode: "markdown_action",
+        memoryText: assistantText,
+        conversationText: message,
+        traceData
+      };
+    }
+
+    const message = assistantText || describeEmptyAssistantReply();
+    if (!assistantText) input.emitDelta(message);
+    return {
+      response: { message },
+      mode: "chat",
+      memoryText: message,
+      conversationText: message,
+      traceData
+    };
   }
 
   // 触发规划阶段 tool hook, 此时只生成待确认动作, 不直接执行系统调用.
