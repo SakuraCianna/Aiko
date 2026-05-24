@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -14,12 +15,18 @@ import {
   streamWithModelRoute
 } from "../../src/main/agent/aikoAgentRuntime";
 import { createAikoCommitmentService } from "../../src/main/agent/commitments/commitmentService";
+import { createAikoAgentWorkflow } from "../../src/main/agent/graph/aikoAgentWorkflow";
+import { createSqliteCheckpointSaver } from "../../src/main/agent/graph/sqliteCheckpointSaver";
 import { createAikoActionJournal } from "../../src/main/agent/runtime/actionJournal";
 import { createAikoRuntimeHooks } from "../../src/main/agent/runtime/runtimeHooks";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
 import { isAutoExecutableDesktopMarkdownAction } from "../../src/main/actions/localActionTrust";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
+import { runMigrations } from "../../src/main/database/migrations";
 import type { ChatPayload } from "../../src/shared/chatPayload";
+import type { PendingActionDto } from "../../src/shared/ipcTypes";
+
+const require = createRequire(import.meta.url);
 
 describe("Aiko persona prompt", () => {
   it("loads the persona prompt from 人物设定.md", () => {
@@ -142,6 +149,79 @@ describe("createAikoAgentRuntime", () => {
     const duplicate = await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
 
     expect(duplicate.ok).toBe(false);
+  });
+
+  it("resumes a persisted pending approval when the in-memory runtime session is gone", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aiko-runtime-checkpoint-"));
+    const dbPath = path.join(tempDir, "aiko.db");
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const action = modelAction("Cursor");
+    const threadId = "approval-restarted-runtime";
+
+    const firstDb = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
+    runMigrations(firstDb);
+    const workflow = createAikoAgentWorkflow({
+      approvalMode: "interrupt",
+      checkpointer: createSqliteCheckpointSaver(firstDb),
+      async retrieve(payload) {
+        return {
+          userText: payload.text,
+          userTranscript: payload.text,
+          userContent: payload.text,
+          attachmentSummaries: [],
+          memories: [],
+          speechResults: [],
+          webResearch: null,
+          currentKnowledge: null,
+          toolHints: []
+        };
+      },
+      async plan() {
+        return {
+          mode: "action",
+          replyDraft: "需要确认.",
+          steps: [{ kind: "action", source: "deterministic", action }],
+          grounding: []
+        };
+      },
+      async prepare() {
+        return {
+          kind: "pending_action",
+          message: "需要确认.",
+          action
+        };
+      }
+    });
+    await workflow.invoke({ text: "打开 Cursor", attachments: [] }, { threadId });
+    firstDb.close();
+
+    const secondDb = new DatabaseSync(dbPath, { enableForeignKeyConstraints: true });
+    runMigrations(secondDb);
+    const restartedRuntime = createAikoAgentRuntime({
+      workflowCheckpointer: createSqliteCheckpointSaver(secondDb),
+      agent: {
+        async invoke() {
+          throw new Error("approval resume should not call the model");
+        }
+      }
+    });
+    const approvalAction: PendingActionDto = {
+      ...action,
+      approval: {
+        mode: "interrupt",
+        threadId,
+        status: "pending_action",
+        workflow: "agent"
+      }
+    };
+
+    await expect(restartedRuntime.resumePendingActionApproval(approvalAction, { type: "approve" })).resolves.toEqual({
+      ok: true,
+      message: "LangGraph approval resumed."
+    });
+
+    secondDb.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("can reject a paused pending action approval", async () => {

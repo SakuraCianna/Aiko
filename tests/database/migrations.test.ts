@@ -19,8 +19,11 @@ describe("runMigrations", () => {
       "action_journal",
       "agent_trace_events",
       "agent_traces",
+      "langgraph_checkpoint_writes",
+      "langgraph_checkpoints",
       "memories",
       "memory_candidates",
+      "memory_vectors",
       "permissions",
       "reminders",
       "settings"

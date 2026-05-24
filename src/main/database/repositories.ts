@@ -1,7 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AikoActionJournalEntry } from "../agent/runtime/actionJournal";
 import type { AikoTraceEvent, AikoTraceRecord } from "../agent/trace/aikoTrace";
-import { recallMemories, type RecalledMemory } from "../memory/memoryRecall";
+import {
+  createMemoryVector,
+  rankMemoriesByVector,
+  type MemoryVector,
+  type RecalledMemory
+} from "../memory/memoryRecall";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
 import type { Reminder, ReminderStatus } from "../reminders/reminderService";
@@ -41,6 +46,11 @@ type MemoryCandidateRow = {
   requires_confirmation: 0 | 1;
   status: MemoryStatus;
   created_at: string;
+};
+
+type MemoryVectorRow = {
+  memory_id: string;
+  vector_json: string;
 };
 
 // 定义审计仓储读取 SQLite 行时使用的结构.
@@ -269,13 +279,15 @@ export function createMemoryRepository(db: DatabaseSync) {
 
     // 根据查询文本召回相关长期记忆.
     recall(query: string, limit = 5): RecalledMemory[] {
+      const vectorByMemoryId = listMemoryVectorRows(db);
       const rows = listAcceptedMemoryRows(db).map((row) => ({
         id: row.id,
         type: row.type,
-        content: row.content
+        content: row.content,
+        vector: vectorByMemoryId.get(row.id) ?? upsertMemoryVector(db, row.id, row.content)
       }));
 
-      return recallMemories(rows, query, limit);
+      return rankMemoriesByVector(rows, query, limit);
     },
 
     // 列出全部记忆候选.
@@ -343,6 +355,7 @@ function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): str
       WHERE id = ?
     `
     ).run(Math.max(duplicate.confidence, candidate.confidence), nowIso(), duplicate.id);
+    upsertMemoryVector(db, duplicate.id, duplicate.content);
     return duplicate.id;
   }
 
@@ -363,7 +376,57 @@ function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): str
     VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
   `
   ).run(memoryId, candidate.type, candidate.content.trim(), candidate.confidence, "accepted", timestamp, timestamp);
+  upsertMemoryVector(db, memoryId, candidate.content);
   return memoryId;
+}
+
+// 写入或刷新记忆的本地向量索引.
+function upsertMemoryVector(db: DatabaseSync, memoryId: string, content: string): MemoryVector {
+  const vector = createMemoryVector(content);
+  db.prepare(
+    `
+    INSERT INTO memory_vectors (memory_id, vector_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(memory_id) DO UPDATE SET
+      vector_json = excluded.vector_json,
+      updated_at = excluded.updated_at
+  `
+  ).run(memoryId, JSON.stringify(vector), nowIso());
+  return vector;
+}
+
+// 读取已持久化的记忆向量, 坏数据会被忽略并在召回时重建.
+function listMemoryVectorRows(db: DatabaseSync): Map<string, MemoryVector> {
+  const rows = db
+    .prepare(
+      `
+      SELECT memory_id, vector_json
+      FROM memory_vectors
+    `
+    )
+    .all() as MemoryVectorRow[];
+
+  const vectors = new Map<string, MemoryVector>();
+  for (const row of rows) {
+    const vector = parseMemoryVector(row.vector_json);
+    if (vector) vectors.set(row.memory_id, vector);
+  }
+  return vectors;
+}
+
+// 安全解析本地向量 JSON.
+function parseMemoryVector(value: string): MemoryVector | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const vector: MemoryVector = {};
+    for (const [term, weight] of Object.entries(parsed)) {
+      if (typeof weight === "number" && Number.isFinite(weight)) vector[term] = weight;
+    }
+    return Object.keys(vector).length > 0 ? vector : null;
+  } catch {
+    return null;
+  }
 }
 
 // 读取所有已接受记忆行.

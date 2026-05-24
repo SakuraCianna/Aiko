@@ -267,7 +267,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const reviewPayload = readWorkflowInterruptPayload(workflowOutput);
       if (!reviewPayload) throw new Error("Aiko workflow interrupted without a pending action payload");
       approvalSessions.set(approvalThreadId, workflow);
-      const action = await trackPendingAction(attachWorkflowApproval(reviewPayload.action, approvalThreadId), runId, "workflow");
+      const action = await trackPendingAction(attachWorkflowApproval(reviewPayload.action, approvalThreadId, "agent"), runId, "workflow");
       emitDelta(reviewPayload.message);
       trace.add("executor.prepared", {
         capability: action.capability,
@@ -492,18 +492,24 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     const threadId = action.approval.threadId;
-    const workflow = approvalSessions.get(threadId);
+    const workflow = approvalSessions.get(threadId) ?? restorePersistedApprovalWorkflow(action);
     if (!workflow) {
       return { ok: false, message: "This approval session has expired or was already resumed." };
     }
 
     const resumeDecision = decision.type === "approve" ? { ...decision, action } : decision;
-    const result = await workflow.resume(resumeDecision, { threadId });
+    let result: Awaited<ReturnType<typeof workflow.resume>>;
+    try {
+      result = await workflow.resume(resumeDecision, { threadId });
+    } catch {
+      return { ok: false, message: "This approval session could not be restored. Please send the request again." };
+    }
     if (isAikoAgentWorkflowInterrupted(result)) {
       return { ok: false, message: "This approval session still needs another decision." };
     }
 
     approvalSessions.delete(threadId);
+    await deletePersistedApprovalCheckpoint(threadId);
     const runId = approvalThreadRuns.get(threadId);
     approvalThreadRuns.delete(threadId);
     actionJournal.recordApproval({
@@ -549,7 +555,37 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     if (!isAikoAgentWorkflowInterrupted(result)) return action;
 
     approvalSessions.set(threadId, workflow);
-    return attachWorkflowApproval(action, threadId);
+    return attachWorkflowApproval(action, threadId, "action_approval");
+  }
+
+  // 内存会话丢失后, 根据 action 上的 workflow 标记重建可 resume 的 LangGraph 工作流.
+  function restorePersistedApprovalWorkflow(action: PendingActionDto): AikoAgentWorkflow | AikoActionApprovalWorkflow | undefined {
+    if (!options.workflowCheckpointer) return undefined;
+    if (action.approval?.workflow === "action_approval") {
+      return createAikoActionApprovalWorkflow({
+        checkpointer: options.workflowCheckpointer
+      });
+    }
+
+    return createAikoAgentWorkflow({
+      approvalMode: "interrupt",
+      checkpointer: options.workflowCheckpointer,
+      async retrieve() {
+        throw new Error("Persisted approval resume should not rerun retrieve");
+      },
+      async plan() {
+        throw new Error("Persisted approval resume should not rerun plan");
+      },
+      async prepare() {
+        throw new Error("Persisted approval resume should not rerun prepare");
+      }
+    });
+  }
+
+  // 审批完成后删除已消费 checkpoint, 避免同一个确认令牌被重复恢复.
+  async function deletePersistedApprovalCheckpoint(threadId: string) {
+    if (!options.workflowCheckpointer) return;
+    await options.workflowCheckpointer.deleteThread(threadId);
   }
 
   // 给待确认动作补充 ID, 记录日志, 并把审批线程映射回运行生命周期.
@@ -1285,13 +1321,18 @@ function readWorkflowInterruptPayload(result: unknown): AikoPendingActionReviewP
 }
 
 // 给待执行动作附加可恢复审批元数据, 前端无需理解该字段, 只要原样传回即可.
-function attachWorkflowApproval(action: PendingActionDto, threadId: string): PendingActionDto {
+function attachWorkflowApproval(
+  action: PendingActionDto,
+  threadId: string,
+  workflow: NonNullable<PendingActionDto["approval"]>["workflow"]
+): PendingActionDto {
   const attached: PendingActionDto = {
     ...action,
     approval: {
       mode: "interrupt",
       threadId,
-      status: "pending_action"
+      status: "pending_action",
+      workflow
     }
   };
   return isAutoExecutableDesktopMarkdownAction(action)

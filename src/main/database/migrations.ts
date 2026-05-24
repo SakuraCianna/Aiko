@@ -24,6 +24,13 @@ export function runMigrations(db: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS memory_vectors (
+      memory_id TEXT PRIMARY KEY,
+      vector_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS permissions (
       id TEXT PRIMARY KEY,
       capability TEXT NOT NULL,
@@ -77,6 +84,35 @@ export function runMigrations(db: DatabaseSync) {
       at TEXT NOT NULL,
       data_json TEXT,
       FOREIGN KEY(trace_request_id) REFERENCES agent_traces(request_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS langgraph_checkpoints (
+      thread_id TEXT NOT NULL,
+      checkpoint_ns TEXT NOT NULL,
+      checkpoint_id TEXT NOT NULL,
+      parent_checkpoint_id TEXT,
+      checkpoint_type TEXT NOT NULL,
+      checkpoint_blob BLOB NOT NULL,
+      metadata_type TEXT NOT NULL,
+      metadata_blob BLOB NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(thread_id, checkpoint_ns, checkpoint_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS langgraph_checkpoint_writes (
+      thread_id TEXT NOT NULL,
+      checkpoint_ns TEXT NOT NULL,
+      checkpoint_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      idx INTEGER NOT NULL,
+      channel TEXT NOT NULL,
+      value_type TEXT NOT NULL,
+      value_blob BLOB NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(thread_id, checkpoint_ns, checkpoint_id, task_id, idx),
+      FOREIGN KEY(thread_id, checkpoint_ns, checkpoint_id)
+        REFERENCES langgraph_checkpoints(thread_id, checkpoint_ns, checkpoint_id)
+        ON DELETE CASCADE
     );
   `);
 }

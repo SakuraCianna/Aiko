@@ -36,6 +36,33 @@ describe("capability policy", () => {
     });
   });
 
+  it("keeps high-risk Windows automation capabilities registered but denied", () => {
+    const policy = createDefaultCapabilityPolicy();
+
+    expect(policy.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: "read_file", risk: "high", defaultDecision: "deny" }),
+      expect.objectContaining({ capability: "write_file", risk: "high", defaultDecision: "deny" }),
+      expect.objectContaining({ capability: "window_control", risk: "high", defaultDecision: "deny" }),
+      expect.objectContaining({ capability: "run_shell_command", risk: "high", defaultDecision: "deny" })
+    ]));
+    expect(
+      evaluateCapabilityPolicy(
+        {
+          title: "Run shell",
+          source: "run command",
+          risk: "low",
+          capability: "run_shell_command",
+          target: "powershell"
+        },
+        policy
+      )
+    ).toMatchObject({
+      allowed: false,
+      requiresConfirmation: false,
+      reason: "high_risk_denied"
+    });
+  });
+
   it("denies nested batch actions", () => {
     const action: PendingActionDto = {
       title: "Nested batch",

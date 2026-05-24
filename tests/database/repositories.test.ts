@@ -300,6 +300,40 @@ describe("database repositories", () => {
     db.close();
   });
 
+  it("persists memory vectors and ranks recall by query overlap", () => {
+    const db = createMemoryDatabase();
+    const repository = createMemoryRepository(db);
+
+    repository.rememberCandidate(
+      {
+        type: "habit",
+        content: "用户深夜编程时喜欢准备咖啡和低干扰音乐",
+        confidence: 0.87,
+        requiresConfirmation: false
+      },
+      "accepted"
+    );
+    repository.rememberCandidate(
+      {
+        type: "preference",
+        content: "用户喜欢咖啡",
+        confidence: 0.91,
+        requiresConfirmation: false
+      },
+      "accepted"
+    );
+
+    const vectorRows = db.prepare("SELECT memory_id, vector_json FROM memory_vectors ORDER BY memory_id ASC").all();
+
+    expect(vectorRows).toHaveLength(2);
+    expect(repository.recall("深夜 编程 咖啡", 2)[0]).toMatchObject({
+      type: "habit",
+      content: "用户深夜编程时喜欢准备咖啡和低干扰音乐"
+    });
+
+    db.close();
+  });
+
   it("promotes or rejects pending memory candidates", () => {
     const db = createMemoryDatabase();
     const repository = createMemoryRepository(db);

@@ -7,6 +7,7 @@ import { createAikoCommitmentService } from "./agent/commitments/commitmentServi
 import { createCommitmentProactiveMessage } from "./agent/commitments/proactiveCommitment";
 import { createAikoActionJournal } from "./agent/runtime/actionJournal";
 import { createAikoRuntimeHooks } from "./agent/runtime/runtimeHooks";
+import { createSqliteCheckpointSaver } from "./agent/graph/sqliteCheckpointSaver";
 import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
@@ -39,6 +40,7 @@ void app.whenReady().then(() => {
   const auditRepository = createAuditRepository(database.db);
   const actionJournal = createAikoActionJournal({ store: auditRepository });
   const traceRecorder = createAikoTraceRecorder({ store: auditRepository });
+  const workflowCheckpointer = createSqliteCheckpointSaver(database.db);
   const commitmentService = createAikoCommitmentService();
   const hooks = createAikoRuntimeHooks();
   const agentRuntime = createAikoAgentRuntime({
@@ -46,6 +48,7 @@ void app.whenReady().then(() => {
     memoryRuntime: memoryRepository,
     actionJournal,
     traceRecorder,
+    workflowCheckpointer,
     commitmentService,
     hooks
   });

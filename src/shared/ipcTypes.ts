@@ -6,6 +6,7 @@ export type PendingActionApprovalDto = {
   mode: "passive" | "interrupt";
   threadId?: string;
   status: "pending_action" | "reviewed";
+  workflow?: "agent" | "action_approval";
 };
 
 export type PendingActionBaseDto = {
