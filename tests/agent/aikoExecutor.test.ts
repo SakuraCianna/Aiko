@@ -31,6 +31,48 @@ describe("createAikoExecutor", () => {
     });
   });
 
+  it("wraps multiple action steps as a batch pending action", async () => {
+    const executor = createAikoExecutor();
+    const plan: AikoPlan = {
+      mode: "action",
+      replyDraft: "我拆成 3 个动作, 等你确认后按顺序执行.",
+      grounding: [],
+      steps: [
+        {
+          kind: "action",
+          source: "deterministic",
+          action: lowRiskAction("open_application", "浏览器")
+        },
+        {
+          kind: "action",
+          source: "deterministic",
+          action: lowRiskAction("open_application", "Cursor")
+        },
+        {
+          kind: "action",
+          source: "deterministic",
+          action: {
+            ...lowRiskAction("create_reminder", "闹钟"),
+            params: {
+              title: "闹钟",
+              triggerAt: "2026-05-24T08:00:00.000Z"
+            }
+          }
+        }
+      ]
+    };
+
+    await expect(executor.prepare(plan)).resolves.toMatchObject({
+      kind: "pending_actions",
+      message: "我拆成 3 个动作, 等你确认后按顺序执行.",
+      actions: [
+        { capability: "open_application", target: "浏览器" },
+        { capability: "open_application", target: "Cursor" },
+        { capability: "create_reminder", target: "闹钟" }
+      ]
+    });
+  });
+
   it("blocks high risk actions before local execution", async () => {
     const executor = createAikoExecutor();
     const plan: AikoPlan = {
@@ -58,3 +100,13 @@ describe("createAikoExecutor", () => {
     });
   });
 });
+
+function lowRiskAction(capability: string, target: string) {
+  return {
+    title: `${capability}:${target}`,
+    source: target,
+    risk: "low" as const,
+    capability,
+    target
+  };
+}

@@ -40,6 +40,7 @@ type PendingActionEntry = {
 };
 
 const PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
+const MAX_BATCH_ACTIONS = 5;
 
 // 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
@@ -261,6 +262,10 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       return { message: result.message };
     }
 
+    if (action.capability === "batch_actions") {
+      return respondWithBatchAction(message, action);
+    }
+
     if (action.capability === "open_application") {
       const decision = resolveOpenApplicationAction(action, getApplications(), {
         defaultApplicationTarget: deps.applicationPreferenceRepository?.getDefaultApplication(action.target)
@@ -286,6 +291,32 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     return { message, pendingAction };
   }
 
+  // 批量动作在进入确认框前先逐项解析本地应用, 遇到歧义时把候选包装回整组动作.
+  function respondWithBatchAction(message: string, action: PendingActionDto): ChatResponse {
+    const resolvedActions: PendingActionDto[] = [];
+
+    for (const [index, childAction] of (action.actions ?? []).entries()) {
+      if (childAction.capability !== "open_application") {
+        resolvedActions.push(childAction);
+        continue;
+      }
+
+      const decision = resolveOpenApplicationAction(childAction, getApplications(), {
+        defaultApplicationTarget: deps.applicationPreferenceRepository?.getDefaultApplication(childAction.target)
+      });
+      if (decision.kind === "choice_required") {
+        return createBatchApplicationChoiceResponse(decision.message, action, index, decision.actions);
+      }
+      resolvedActions.push(decision.action);
+    }
+
+    const resolvedBatchAction: PendingActionDto = {
+      ...action,
+      actions: resolvedActions
+    };
+    return { message, pendingAction: storePendingAction(resolvedBatchAction) };
+  }
+
   // 为候选应用生成独立待执行动作, 用户选择某一项时只执行对应动作.
   function createApplicationChoiceResponse(
     message: string,
@@ -308,6 +339,52 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
           target: pendingChoice.target,
           params: pendingChoice.params,
           approval: pendingChoice.approval
+        }
+      };
+    });
+
+    return {
+      message,
+      pendingAction: {
+        id: crypto.randomUUID(),
+        title: "选择要打开的应用",
+        source: sourceAction.source,
+        risk: "low",
+        capability: "choose_application",
+        target: sourceAction.target,
+        choices
+      }
+    };
+  }
+
+  // 为批量动作中的某个歧义应用生成候选, 用户选择后继续执行完整批量动作.
+  function createBatchApplicationChoiceResponse(
+    message: string,
+    sourceAction: PendingActionDto,
+    actionIndex: number,
+    actions: PendingActionDto[]
+  ): ChatResponse {
+    const choices = actions.map((candidate) => {
+      const batchActions = [...(sourceAction.actions ?? [])];
+      batchActions[actionIndex] = candidate;
+      const pendingBatch = storePendingAction({
+        ...sourceAction,
+        actions: batchActions
+      });
+      return {
+        id: pendingBatch.id,
+        title: candidate.target,
+        subtitle: "打开这个应用, 并继续执行整组操作",
+        action: {
+          id: pendingBatch.id,
+          title: pendingBatch.title,
+          source: pendingBatch.source,
+          risk: pendingBatch.risk,
+          capability: pendingBatch.capability,
+          target: pendingBatch.target,
+          params: pendingBatch.params,
+          approval: pendingBatch.approval,
+          actions: pendingBatch.actions
         }
       };
     });
@@ -437,7 +514,7 @@ function isCancelActionRequest(value: unknown): value is CancelActionRequest {
 }
 
 // 校验跨 IPC 传入的待确认动作结构, 具体能力再交给 isSupportedAction 限制.
-function isPendingActionRequestAction(action: unknown): action is PendingActionDto {
+function isPendingActionRequestAction(action: unknown, depth = 0): action is PendingActionDto {
   if (
     !!action &&
     typeof action === "object" &&
@@ -450,14 +527,32 @@ function isPendingActionRequestAction(action: unknown): action is PendingActionD
     typeof (action as PendingActionDto).capability === "string" &&
     typeof (action as PendingActionDto).target === "string"
   ) {
-    return isSupportedAction(action as PendingActionDto);
+    return isSupportedAction(action as PendingActionDto, depth);
   }
   return false;
 }
 
 // 判断待执行动作是否在当前版本支持的安全范围内.
-function isSupportedAction(action: PendingActionDto): boolean {
+function isSupportedAction(action: PendingActionDto, depth = 0): boolean {
   if (action.title.length > 180 || action.source.length > 1000 || action.target.length > 2048) return false;
+
+  if (action.capability === "batch_actions") {
+    const actions = action.actions;
+    return (
+      depth === 0 &&
+      action.target === "batch" &&
+      Array.isArray(actions) &&
+      actions.length > 0 &&
+      actions.length <= MAX_BATCH_ACTIONS &&
+      actions.every((childAction) => {
+        return (
+          childAction.capability !== "batch_actions" &&
+          childAction.choices === undefined &&
+          isPendingActionRequestAction(childAction, depth + 1)
+        );
+      })
+    );
+  }
 
   if (action.capability === "open_url") {
     try {
@@ -479,6 +574,13 @@ function isSupportedAction(action: PendingActionDto): boolean {
 
   if (action.capability === "create_reminder") {
     const params = action.params;
+    const hasTitle = typeof params?.title === "string" && params.title.trim().length > 0 && params.title.length <= 180;
+    const triggerAt = params?.triggerAt;
+    if (hasTitle && typeof triggerAt === "string") {
+      const triggerTime = new Date(triggerAt).getTime();
+      return triggerAt.length <= 80 && Number.isFinite(triggerTime);
+    }
+
     return (
       !!params &&
       typeof params.amount === "number" &&
@@ -486,9 +588,7 @@ function isSupportedAction(action: PendingActionDto): boolean {
       params.amount > 0 &&
       params.amount <= 525600 &&
       (params.unit === "minutes" || params.unit === "hours") &&
-      typeof params.title === "string" &&
-      params.title.trim().length > 0 &&
-      params.title.length <= 180
+      hasTitle
     );
   }
 
@@ -551,6 +651,7 @@ function sameAction(left: PendingActionDto, right: PendingActionDto): boolean {
     left.capability === right.capability &&
     left.target === right.target &&
     JSON.stringify(left.params ?? {}) === JSON.stringify(right.params ?? {}) &&
-    JSON.stringify(left.approval ?? {}) === JSON.stringify(right.approval ?? {})
+    JSON.stringify(left.approval ?? {}) === JSON.stringify(right.approval ?? {}) &&
+    JSON.stringify(left.actions ?? []) === JSON.stringify(right.actions ?? [])
   );
 }

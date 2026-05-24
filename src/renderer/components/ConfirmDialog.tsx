@@ -22,6 +22,7 @@ export function ConfirmDialog({
 
   const riskLabel = action.risk === "low" ? "低" : action.risk === "medium" ? "中" : "高";
   const choices = action.choices ?? [];
+  const batchActions = action.actions ?? [];
 
   return (
     <div className="dialog-backdrop">
@@ -49,6 +50,16 @@ export function ConfirmDialog({
         ) : (
           <>
             <p>风险:{riskLabel}</p>
+            {batchActions.length > 0 && (
+              <ol className="batch-action-list">
+                {batchActions.map((batchAction, index) => (
+                  <li key={`${batchAction.capability}-${batchAction.target}-${index}`}>
+                    <span>{batchAction.title}</span>
+                    <small>{batchAction.target}</small>
+                  </li>
+                ))}
+              </ol>
+            )}
             <div className="dialog-actions">
               <button type="button" onClick={onOnce}>
                 仅这一次

@@ -15,6 +15,12 @@ export type RelativeReminderInput = {
   baseTime: Date;
 };
 
+export type AbsoluteReminderInput = {
+  title: string;
+  triggerAt: Date;
+  baseTime: Date;
+};
+
 // 根据相对时间创建一次性提醒.
 export function createRelativeReminder(input: RelativeReminderInput): Reminder {
   const multiplier = input.unit === "hours" ? 60 : 1;
@@ -24,6 +30,17 @@ export function createRelativeReminder(input: RelativeReminderInput): Reminder {
     id: `reminder_${crypto.randomUUID()}`,
     title: input.title,
     triggerAt: triggerAt.toISOString(),
+    createdAt: input.baseTime.toISOString(),
+    status: "active"
+  };
+}
+
+// 根据绝对时间创建一次性提醒, 供本地解析和模型工具共用.
+export function createAbsoluteReminder(input: AbsoluteReminderInput): Reminder {
+  return {
+    id: `reminder_${crypto.randomUUID()}`,
+    title: input.title,
+    triggerAt: input.triggerAt.toISOString(),
     createdAt: input.baseTime.toISOString(),
     status: "active"
   };

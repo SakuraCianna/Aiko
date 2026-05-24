@@ -2,6 +2,30 @@ import { describe, expect, it } from "vitest";
 import { createAikoPlanner } from "../../src/main/agent/planner/aikoPlanner";
 
 describe("createAikoPlanner", () => {
+  it("splits a compound local request into multiple deterministic actions", async () => {
+    const planner = createAikoPlanner({
+      now: () => new Date("2026-05-24T09:00:00+08:00")
+    });
+
+    const plan = await planner.plan({
+      userText: "打开浏览器, 打开cursor, 然后帮我设定下午四点钟的闹钟",
+      userTranscript: "打开浏览器, 打开cursor, 然后帮我设定下午四点钟的闹钟",
+      toolHints: []
+    });
+
+    expect(plan.mode).toBe("action");
+    expect(plan.steps.map((step) => step.action.capability)).toEqual([
+      "open_application",
+      "open_application",
+      "create_reminder"
+    ]);
+    expect(plan.steps.map((step) => step.action.target)).toEqual(["浏览器", "Cursor", "闹钟"]);
+    expect(plan.steps[2]?.action.params).toMatchObject({
+      title: "闹钟",
+      triggerAt: "2026-05-24T08:00:00.000Z"
+    });
+  });
+
   it("plans deterministic application actions without a model", async () => {
     const planner = createAikoPlanner();
 

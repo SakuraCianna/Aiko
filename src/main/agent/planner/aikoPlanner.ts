@@ -7,18 +7,23 @@ export type AikoPlanner = {
   plan: (input: PlannerInput) => Promise<AikoPlan>;
 };
 
+export type AikoPlannerOptions = {
+  now?: () => Date;
+};
+
 type DetectedAction = {
   message: string;
   action: PendingActionDto;
 };
 
 // 创建 Aiko Planner, 负责把用户输入转换成结构化计划.
-export function createAikoPlanner(): AikoPlanner {
+export function createAikoPlanner(options: AikoPlannerOptions = {}): AikoPlanner {
+  const now = options.now ?? (() => new Date());
   return {
     // 规划一次请求, 先处理确定性本地动作.
     async plan(input) {
-      const action = detectFirstDeterministicAction(input.userText, input.userTranscript);
-      if (!action) {
+      const actions = detectDeterministicActions(input.userText, input.userTranscript, now);
+      if (actions.length === 0) {
         return {
           mode: "chat",
           replyDraft: "",
@@ -29,37 +34,36 @@ export function createAikoPlanner(): AikoPlanner {
 
       return {
         mode: "action",
-        replyDraft: action.message,
-        steps: [
-          {
-            kind: "action",
-            source: "deterministic",
-            action: action.action
-          }
-        ],
-        grounding: [
-          {
-            source: "deterministic_rule",
-            note: action.action.capability
-          }
-        ]
+        replyDraft: describeDeterministicPlan(actions),
+        steps: actions.map((action) => ({
+          kind: "action",
+          source: "deterministic",
+          action: action.action
+        })),
+        grounding: actions.map((action) => ({
+          source: "deterministic_rule",
+          note: action.action.capability
+        }))
       };
     }
   };
 }
 
-// 从文本和语音转写候选中找出第一个确定性动作.
-function detectFirstDeterministicAction(userText: string, userTranscript: string): DetectedAction | null {
+// 从文本和语音转写候选中找出所有确定性动作.
+function detectDeterministicActions(userText: string, userTranscript: string, now: () => Date): DetectedAction[] {
   const candidates = [userText, ...userTranscript.split("\n")].filter((candidate) => candidate.trim().length > 0);
   for (const candidate of candidates) {
-    const action = detectDeterministicAction(candidate);
-    if (action) return action;
+    const segments = splitCompoundActionText(candidate);
+    const actions = segments
+      .map((segment) => detectDeterministicAction(segment, now))
+      .filter((action): action is DetectedAction => Boolean(action));
+    if (actions.length > 0) return actions;
   }
-  return null;
+  return [];
 }
 
 // 从用户输入中识别可以本地确定处理的简单动作.
-export function detectDeterministicAction(input: string): DetectedAction | null {
+export function detectDeterministicAction(input: string, now: () => Date = () => new Date()): DetectedAction | null {
   const text = input.trim();
   if (detectCurrentKnowledgeIntent(text)) return null;
 
@@ -163,7 +167,108 @@ export function detectDeterministicAction(input: string): DetectedAction | null 
     });
   }
 
+  const absoluteReminder = detectAbsoluteReminder(text, now);
+  if (absoluteReminder) return absoluteReminder;
+
   return null;
+}
+
+// 把一句话里的多个本地动作拆成候选片段.
+function splitCompoundActionText(input: string): string[] {
+  return input
+    .split(/(?:然后|接着|顺便|并且|以及|再|，|,|；|;|。)/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+// 识别"今天下午四点提醒我"这类绝对时间提醒.
+function detectAbsoluteReminder(text: string, now: () => Date): DetectedAction | null {
+  if (!/(?:提醒|闹钟|叫我|喊我|设定|设置)/.test(text)) return null;
+  const time = parseAbsoluteReminderTime(text, now());
+  if (!time) return null;
+  const title = extractAbsoluteReminderTitle(text) || "提醒";
+  return toDetectedAction({
+      title: `创建提醒:${title}`,
+      source: text,
+      risk: "low",
+      capability: "create_reminder",
+      target: title,
+      params: {
+        title,
+        triggerAt: time.toISOString()
+      }
+  });
+}
+
+// 从提醒文本里提取标题, 没有明确标题时把"闹钟"作为默认标题.
+function extractAbsoluteReminderTitle(text: string): string | null {
+  const reminderTitle = text.match(/提醒我\s*(.+)$/)?.[1]?.trim();
+  if (reminderTitle) {
+    return reminderTitle.replace(/^(?:今天|明天)?(?:上午|下午|晚上|中午|凌晨)?[零一二两三四五六七八九十\d:：点半分\s]+(?:钟)?/, "").trim() || "提醒";
+  }
+  if (text.includes("闹钟")) return "闹钟";
+  if (text.includes("提醒")) return "提醒";
+  return null;
+}
+
+// 解析中文或数字时间, 支持今天/明天, 上午/下午/晚上, 4点/四点/16:30.
+function parseAbsoluteReminderTime(text: string, baseTime: Date): Date | null {
+  const match = text.match(
+    /(?:(今天|明天)\s*)?(上午|下午|晚上|中午|凌晨)?\s*([零〇一二两三四五六七八九十\d]{1,3})(?:[:：点时])\s*([零〇一二两三四五六七八九十\d]{1,3}|半)?/
+  );
+  if (!match?.[3]) return null;
+
+  const dayLabel = match[1];
+  const period = match[2];
+  const hour = parseChineseNumber(match[3]);
+  if (hour === null || hour > 23) return null;
+  const minuteText = match[4];
+  const minute = minuteText === "半" ? 30 : minuteText ? parseChineseNumber(minuteText) : 0;
+  if (minute === null || minute > 59) return null;
+
+  const target = new Date(baseTime);
+  if (dayLabel === "明天") target.setDate(target.getDate() + 1);
+  let normalizedHour = hour;
+  if ((period === "下午" || period === "晚上") && normalizedHour < 12) normalizedHour += 12;
+  if (period === "中午" && normalizedHour < 11) normalizedHour += 12;
+  if (period === "凌晨" && normalizedHour === 12) normalizedHour = 0;
+  target.setHours(normalizedHour, minute, 0, 0);
+  if (!dayLabel && target.getTime() <= baseTime.getTime()) target.setDate(target.getDate() + 1);
+  return target;
+}
+
+// 把简单中文数字转换为阿拉伯数字.
+function parseChineseNumber(input: string): number | null {
+  if (/^\d+$/.test(input)) return Number(input);
+  const digits: Record<string, number> = {
+    零: 0,
+    "〇": 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9
+  };
+  if (input === "十") return 10;
+  if (input.includes("十")) {
+    const [left, right] = input.split("十");
+    const tens = left ? digits[left] : 1;
+    const ones = right ? digits[right] : 0;
+    if (tens === undefined || ones === undefined) return null;
+    return tens * 10 + ones;
+  }
+  return digits[input] ?? null;
+}
+
+// 多动作时给用户一个总览, 单动作时保持原来的 Aiko 语气.
+function describeDeterministicPlan(actions: DetectedAction[]): string {
+  if (actions.length === 1) return actions[0]?.message ?? "";
+  return `我拆成 ${actions.length} 个动作, 等你确认后按顺序执行.`;
 }
 
 // 判断用户是否想取消最近一条待触发提醒.
@@ -199,6 +304,7 @@ function normalizeApplicationQuery(rawQuery: string): string {
     chrome: "Google Chrome",
     谷歌: "Google Chrome",
     谷歌浏览器: "Google Chrome",
+    cursor: "Cursor",
     vscode: "VS Code",
     visualstudiocode: "VS Code",
     code: "VS Code"

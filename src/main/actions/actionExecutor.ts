@@ -13,6 +13,7 @@ import {
 } from "../ai/aikoVoice";
 import type { PermissionRule } from "../permissions/permissionService";
 import {
+  createAbsoluteReminder,
   createRelativeReminder,
   type Reminder,
 } from "../reminders/reminderService";
@@ -85,6 +86,10 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       return { ok: false, message: describeActionFailure(action, "high_risk") };
     }
 
+    if (action.capability === "batch_actions") {
+      return executeBatchAction(action, remember);
+    }
+
     if (action.capability === "open_url") {
       await deps.openUrl(action.target);
       rememberSuccessfulPermission(action, remember);
@@ -128,6 +133,28 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       const amount = readNumberParam(action.params, "amount");
       const unit = action.params?.unit;
       const title = readStringParam(action.params, "title") || action.target;
+      const triggerAtText = readStringParam(action.params, "triggerAt");
+
+      if (triggerAtText) {
+        const baseTime = deps.now();
+        const triggerAt = new Date(triggerAtText);
+        if (!Number.isFinite(triggerAt.getTime()) || triggerAt.getTime() <= baseTime.getTime()) {
+          return { ok: false, message: describeActionFailure(action, "invalid") };
+        }
+
+        const reminder = createAbsoluteReminder({
+          title,
+          triggerAt,
+          baseTime
+        });
+        if (deps.reminderRepository) {
+          deps.reminderRepository.save(reminder);
+        } else {
+          reminders.push(reminder);
+        }
+        rememberSuccessfulPermission(action, remember);
+        return { ok: true, message: describeActionSuccess(action) };
+      }
 
       // 提醒参数来自模型侧 payload, 保存前必须重新校验.
       if (!amount || (unit !== "minutes" && unit !== "hours")) {
@@ -184,6 +211,29 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     }
 
     return { ok: false, message: describeActionFailure(action, "unsupported") };
+  }
+
+  // 顺序执行批量动作, 每个子动作仍然走同一套权限后执行校验.
+  async function executeBatchAction(
+    action: ExecuteActionRequest["action"],
+    remember: boolean,
+  ): Promise<ExecuteActionResponse> {
+    const actions = action.actions ?? [];
+    if (actions.length === 0 || actions.some((child) => child.risk === "high" || child.capability === "batch_actions")) {
+      return { ok: false, message: describeActionFailure(action, "invalid") };
+    }
+
+    const results: ExecuteActionResponse[] = [];
+    for (const childAction of actions) {
+      results.push(await executeSafely(childAction, remember));
+    }
+
+    const ok = results.every((result) => result.ok);
+    const lines = results.map((result, index) => `${index + 1}. ${result.message}`);
+    return {
+      ok,
+      message: `${ok ? "这组操作我处理完了" : "这组操作有部分没完成"}:\n${lines.join("\n")}`
+    };
   }
 
   // 执行成功后才记住权限, 避免失败动作污染自动授权规则.

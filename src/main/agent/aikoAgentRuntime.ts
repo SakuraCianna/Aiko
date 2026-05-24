@@ -227,6 +227,19 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
     const { context, proposal } = workflowOutput;
     throwIfAborted(signal);
+    if (proposal.kind === "pending_actions") {
+      const batchAction = createBatchAction(proposal.message, context.userTranscript, proposal.actions);
+      const approvedAction = await preparePendingActionApproval(proposal.message, batchAction);
+      emitDelta(proposal.message);
+      trace.add("executor.prepared_batch", {
+        actionCount: proposal.actions.length,
+        risk: batchAction.risk
+      });
+      trace.end({ mode: "action" });
+      rememberConversationTurn(context.userTranscript, proposal.message);
+      return respondWithAction(proposal.message, approvedAction);
+    }
+
     if (proposal.kind === "pending_action") {
       emitDelta(proposal.message);
       trace.add("executor.prepared", {
@@ -256,7 +269,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
       throwIfAborted(signal);
       const assistantText = extractAssistantText(result);
-      const action = proposedActions.at(-1);
+      const action = proposedActions.length > 1
+        ? createBatchAction(`我拆成 ${proposedActions.length} 个动作, 等你确认后按顺序执行.`, context.userTranscript, proposedActions)
+        : proposedActions.at(-1);
       trace.add("agent.completed", {
         hasText: assistantText.length > 0,
         hasAction: Boolean(action)
@@ -957,6 +972,25 @@ function respondWithAction(message: string, action: PendingActionDto): ChatRespo
     message,
     pendingAction: action
   };
+}
+
+// 把多个子动作折叠成一个待确认批量动作, IPC 层会继续逐项解析和执行.
+function createBatchAction(message: string, source: string, actions: PendingActionDto[]): PendingActionDto {
+  return {
+    title: `执行 ${actions.length} 个操作`,
+    source: source.trim().slice(0, 1000) || message,
+    risk: selectBatchRisk(actions),
+    capability: "batch_actions",
+    target: "batch",
+    actions
+  };
+}
+
+// 批量动作继承子动作最高风险, 避免把 medium/high 伪装成 low.
+function selectBatchRisk(actions: PendingActionDto[]): PendingActionDto["risk"] {
+  if (actions.some((action) => action.risk === "high")) return "high";
+  if (actions.some((action) => action.risk === "medium")) return "medium";
+  return "low";
 }
 
 // 判断这次请求是否更适合落成 Markdown 文件, 避免长文塞进桌宠消息区.

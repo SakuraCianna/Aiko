@@ -23,11 +23,12 @@ export type PendingActionChoiceDto = {
   id: string;
   title: string;
   subtitle?: string;
-  action: PendingActionBaseDto & { id: string };
+  action: PendingActionDto & { id: string };
 };
 
 export type PendingActionDto = PendingActionBaseDto & {
   choices?: PendingActionChoiceDto[];
+  actions?: PendingActionDto[];
 };
 
 export type ExecuteActionRequest = {

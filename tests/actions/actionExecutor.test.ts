@@ -153,6 +153,54 @@ describe("createActionExecutor", () => {
     });
   });
 
+  it("executes batch actions sequentially and creates an absolute reminder", async () => {
+    const opened: Array<{ query: string; expectedPath?: string }> = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async (query, expectedPath) => {
+        opened.push({ query, expectedPath });
+        return true;
+      },
+      now: () => new Date("2026-05-24T09:00:00+08:00")
+    });
+
+    const result = await executor.execute({
+      action: {
+        title: "执行 3 个操作",
+        source: "打开浏览器, 打开cursor, 然后帮我设定下午四点钟的闹钟",
+        risk: "low",
+        capability: "batch_actions",
+        target: "batch",
+        actions: [
+          lowRiskAction("open_application", "Google Chrome"),
+          lowRiskAction("open_application", "Cursor"),
+          {
+            ...lowRiskAction("create_reminder", "闹钟"),
+            params: {
+              title: "闹钟",
+              triggerAt: "2026-05-24T08:00:00.000Z"
+            }
+          }
+        ]
+      },
+      remember: false
+    });
+
+    expect(result.ok).toBe(true);
+    expect(opened).toEqual([
+      { query: "Google Chrome", expectedPath: undefined },
+      { query: "Cursor", expectedPath: undefined }
+    ]);
+    expect(executor.listReminders()).toMatchObject([
+      {
+        title: "闹钟",
+        triggerAt: "2026-05-24T08:00:00.000Z",
+        status: "active"
+      }
+    ]);
+    expect(result.message).toContain("这组操作我处理完了");
+  });
+
   it("rejects high-risk actions", async () => {
     const executor = createActionExecutor({
       openUrl: async () => undefined,

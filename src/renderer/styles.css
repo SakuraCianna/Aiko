@@ -354,6 +354,31 @@ button {
   margin-top: 16px;
 }
 
+.batch-action-list {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+  overflow: auto;
+  color: #293949;
+  font-size: 13px;
+}
+
+.batch-action-list li {
+  padding: 6px 0;
+}
+
+.batch-action-list span,
+.batch-action-list small {
+  display: block;
+}
+
+.batch-action-list small {
+  color: #65778a;
+  font-size: 11px;
+}
+
 .choice-actions {
   display: grid;
   gap: 8px;

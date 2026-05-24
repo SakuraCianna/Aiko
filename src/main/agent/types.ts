@@ -74,6 +74,11 @@ export type ExecutionProposal =
       action: PendingActionDto;
     }
   | {
+      kind: "pending_actions";
+      message: string;
+      actions: PendingActionDto[];
+    }
+  | {
       kind: "blocked";
       message: string;
     };

@@ -100,7 +100,8 @@ export function App() {
           target: response.pendingAction.target,
           params: response.pendingAction.params,
           approval: response.pendingAction.approval,
-          choices: response.pendingAction.choices
+          choices: response.pendingAction.choices,
+          actions: response.pendingAction.actions
         });
       } else {
         speakAiko(response.message, "idle");
