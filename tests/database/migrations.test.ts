@@ -23,6 +23,7 @@ describe("runMigrations", () => {
       "langgraph_checkpoints",
       "memories",
       "memory_candidates",
+      "memory_vec_rowids",
       "memory_vectors",
       "permissions",
       "reminders",

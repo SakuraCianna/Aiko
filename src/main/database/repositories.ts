@@ -7,6 +7,7 @@ import {
   type MemoryVector,
   type RecalledMemory
 } from "../memory/memoryRecall";
+import type { AikoMemoryVectorIndex } from "../memory/sqliteVecMemoryIndex";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
 import type { Reminder, ReminderStatus } from "../reminders/reminderService";
@@ -26,6 +27,10 @@ export type ReminderRepository = ReturnType<typeof createReminderRepository>;
 export type MemoryRepository = ReturnType<typeof createMemoryRepository>;
 export type ApplicationPreferenceRepository = ReturnType<typeof createApplicationPreferenceRepository>;
 export type AuditRepository = ReturnType<typeof createAuditRepository>;
+
+type MemoryRepositoryOptions = {
+  vectorIndex?: AikoMemoryVectorIndex;
+};
 
 type MemoryRow = {
   id: string;
@@ -241,7 +246,7 @@ function parseTraceData(value: string | null): Record<string, unknown> | undefin
 }
 
 // 创建长期记忆仓储, 负责候选记忆和已接受记忆的读写.
-export function createMemoryRepository(db: DatabaseSync) {
+export function createMemoryRepository(db: DatabaseSync, options: MemoryRepositoryOptions = {}) {
   return {
     // 保存一个记忆候选, 如果已接受则同步写入长期记忆.
     rememberCandidate(candidate: MemoryCandidate, status: MemoryStatus) {
@@ -271,7 +276,7 @@ export function createMemoryRepository(db: DatabaseSync) {
 
       let memoryId: string | null = null;
       if (status === "accepted") {
-        memoryId = upsertAcceptedMemory(db, candidate);
+        memoryId = upsertAcceptedMemory(db, candidate, options.vectorIndex);
       }
 
       return { candidateId, memoryId };
@@ -286,6 +291,12 @@ export function createMemoryRepository(db: DatabaseSync) {
         content: row.content,
         vector: vectorByMemoryId.get(row.id) ?? upsertMemoryVector(db, row.id, row.content)
       }));
+      for (const row of rows) {
+        options.vectorIndex?.upsert(row.id, row.content);
+      }
+
+      const vectorIndexResult = options.vectorIndex?.rank(rows, query, limit);
+      if (vectorIndexResult && vectorIndexResult.length > 0) return vectorIndexResult;
 
       return rankMemoriesByVector(rows, query, limit);
     },
@@ -322,12 +333,16 @@ export function createMemoryRepository(db: DatabaseSync) {
       if (!row) return false;
 
       db.prepare("UPDATE memory_candidates SET status = ? WHERE id = ?").run("accepted", candidateId);
-      upsertAcceptedMemory(db, {
-        type: row.type,
-        content: row.content,
-        confidence: row.confidence,
-        requiresConfirmation: Boolean(row.requires_confirmation)
-      });
+      upsertAcceptedMemory(
+        db,
+        {
+          type: row.type,
+          content: row.content,
+          confidence: row.confidence,
+          requiresConfirmation: Boolean(row.requires_confirmation)
+        },
+        options.vectorIndex
+      );
       return true;
     },
 
@@ -340,7 +355,11 @@ export function createMemoryRepository(db: DatabaseSync) {
 }
 
 // 写入已接受记忆, 已存在同类内容时更新置信度.
-function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): string {
+function upsertAcceptedMemory(
+  db: DatabaseSync,
+  candidate: MemoryCandidate,
+  vectorIndex?: AikoMemoryVectorIndex
+): string {
   const normalizedContent = normalizeMemoryContent(candidate.content);
   const duplicate = listAcceptedMemoryRows(db).find(
     (row) => row.type === candidate.type && normalizeMemoryContent(row.content) === normalizedContent
@@ -356,6 +375,7 @@ function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): str
     `
     ).run(Math.max(duplicate.confidence, candidate.confidence), nowIso(), duplicate.id);
     upsertMemoryVector(db, duplicate.id, duplicate.content);
+    vectorIndex?.upsert(duplicate.id, duplicate.content);
     return duplicate.id;
   }
 
@@ -377,6 +397,7 @@ function upsertAcceptedMemory(db: DatabaseSync, candidate: MemoryCandidate): str
   `
   ).run(memoryId, candidate.type, candidate.content.trim(), candidate.confidence, "accepted", timestamp, timestamp);
   upsertMemoryVector(db, memoryId, candidate.content);
+  vectorIndex?.upsert(memoryId, candidate.content);
   return memoryId;
 }
 

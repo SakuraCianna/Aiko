@@ -19,6 +19,7 @@ import {
   createReminderRepository
 } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
+import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
 import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
@@ -36,7 +37,8 @@ void app.whenReady().then(() => {
   const panelWindow = createPanelWindow(preloadPath);
   const config = loadConfig();
   database = openDatabase();
-  const memoryRepository = createMemoryRepository(database.db);
+  const memoryVectorIndex = createSqliteVecMemoryIndex(database.db);
+  const memoryRepository = createMemoryRepository(database.db, { vectorIndex: memoryVectorIndex });
   const auditRepository = createAuditRepository(database.db);
   const actionJournal = createAikoActionJournal({ store: auditRepository });
   const traceRecorder = createAikoTraceRecorder({ store: auditRepository });

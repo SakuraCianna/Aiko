@@ -12,6 +12,7 @@ export type AikoDatabase = {
 export function openDatabase(): AikoDatabase {
   const dbPath = path.join(app.getPath("userData"), "aiko.db");
   const db = new DatabaseSync(dbPath, {
+    allowExtension: true,
     enableForeignKeyConstraints: true,
     timeout: 5000
   });

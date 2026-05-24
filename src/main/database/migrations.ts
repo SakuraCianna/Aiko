@@ -31,6 +31,12 @@ export function runMigrations(db: DatabaseSync) {
       FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS memory_vec_rowids (
+      memory_id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS permissions (
       id TEXT PRIMARY KEY,
       capability TEXT NOT NULL,
