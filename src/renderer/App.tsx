@@ -11,6 +11,7 @@ import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { isCancellationCommand } from "./chat/cancelCommand";
+import { selectActionForCancellation } from "./chat/pendingAction";
 import {
   selectActionResultCue,
   selectCancelMotion,
@@ -147,7 +148,7 @@ export function App() {
   // 新请求开始前安静取消旧请求, 避免旧模型流继续占用调用或留下过期动作.
   function cancelPreviousResponseBeforeNewRequest() {
     const previousRequestId = activeStreamIdRef.current;
-    const actionToCancel = pendingAction;
+    const actionToCancel = selectActionForCancellation(pendingAction);
     if (actionToCancel) void window.aiko.cancelAction({ action: actionToCancel, reason: "replaced_by_new_request" });
     if (!previousRequestId) return;
 
@@ -173,9 +174,10 @@ export function App() {
   // 切换窗口点击穿透状态.
   // 拒绝当前待确认动作, 通知主进程恢复 LangGraph 审批并清理会话.
   async function cancelPendingAction(action: PendingActionDto | null = pendingAction) {
-    if (!action) return;
+    const actionToCancel = selectActionForCancellation(action);
+    if (!actionToCancel) return;
     const result = await window.aiko.cancelAction({
-      action,
+      action: actionToCancel,
       reason: "user_cancelled"
     });
     const cancelMessage = result.message || "已取消. 我先把手收回来.";
