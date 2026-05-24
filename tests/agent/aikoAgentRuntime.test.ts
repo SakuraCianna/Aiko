@@ -277,6 +277,41 @@ describe("createAikoAgentRuntime", () => {
     ]);
   });
 
+  it("exposes a compact agent debug snapshot for the management panel", async () => {
+    const traceRecorder = createAikoTraceRecorder();
+    const runtime = createAikoAgentRuntime({
+      traceRecorder,
+      agent: {
+        async invoke() {
+          return {
+            messages: [{ role: "assistant", content: "我会先安排最重要的一步." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("帮我安排今晚学习"));
+    const snapshot = runtime.listAgentDebugSnapshot();
+
+    expect(snapshot.runs[0]).toMatchObject({
+      sessionId: "chat",
+      status: "completed"
+    });
+    expect(snapshot.traces[0]?.events.map((event) => event.name)).toEqual([
+      "retriever.completed",
+      "planner.completed",
+      "model_generate.completed",
+      "postprocess.completed",
+      "memory_commit.completed",
+      "agent.completed",
+      "request.completed"
+    ]);
+    expect(snapshot.workers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "memory_write_worker" }),
+      expect.objectContaining({ name: "commitment_worker" })
+    ]));
+  });
+
   it("keeps model-proposed actions isolated across concurrent requests", async () => {
     const firstGate = createGate();
     const secondGate = createGate();

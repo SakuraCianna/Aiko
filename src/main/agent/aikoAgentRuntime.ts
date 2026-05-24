@@ -6,7 +6,7 @@ import { ChatOpenAICompletions } from "@langchain/openai";
 import { createAgent, tool } from "langchain";
 import { z } from "zod";
 import type { ChatPayload } from "../../shared/chatPayload";
-import type { ChatResponse, PendingActionDto } from "../../shared/ipcTypes";
+import type { AikoAgentDebugSnapshotDto, ChatResponse, PendingActionDto } from "../../shared/ipcTypes";
 import {
   describePendingAction,
   describeEmptyAssistantReply,
@@ -117,6 +117,7 @@ export type AikoAgentRuntime = {
   listActionJournal: () => AikoActionJournalEntry[];
   listCommitments: () => AikoCommitment[];
   listWorkers: () => AikoWorkerSummary[];
+  listAgentDebugSnapshot: () => AikoAgentDebugSnapshotDto;
 };
 
 export type AikoAgentRequestOptions = {
@@ -416,7 +417,13 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     listRuns: () => runLifecycle.listRuns(),
     listActionJournal: () => actionJournal.list(),
     listCommitments: () => commitmentService.list(),
-    listWorkers: () => workerRegistry.list()
+    listWorkers: () => workerRegistry.list(),
+    listAgentDebugSnapshot: () => ({
+      runs: runLifecycle.listRuns(),
+      actionJournal: actionJournal.list(),
+      traces: traceRecorder.list(),
+      workers: workerRegistry.list()
+    })
   };
 
   // 将当前短期上下文注入模型输入, 不影响长期记忆.

@@ -10,6 +10,7 @@ const panels: Array<{ id: PanelName; label: string }> = [
   { id: "chat", label: "聊天" },
   { id: "reminders", label: "提醒" },
   { id: "memory", label: "记忆" },
+  { id: "agent", label: "Agent" },
   { id: "settings", label: "设置" }
 ];
 

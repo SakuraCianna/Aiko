@@ -549,3 +549,98 @@ button {
   align-items: start;
   gap: 8px;
 }
+
+.agent-debug-panel {
+  align-content: start;
+}
+
+.agent-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-debug-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.96);
+}
+
+.agent-debug-card strong {
+  overflow-wrap: anywhere;
+}
+
+.agent-debug-card p {
+  margin: 0;
+  color: #53687b;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.agent-debug-card span {
+  color: #667789;
+  font-size: 12px;
+}
+
+.agent-step-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-step-list li {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(73, 101, 126, 0.14);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.78);
+}
+
+.agent-step-list .important-step {
+  border-color: rgba(69, 126, 154, 0.28);
+  background: rgba(231, 241, 246, 0.8);
+}
+
+.agent-step-list span {
+  color: #26394b;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.agent-step-list small {
+  color: #667789;
+  font-size: 12px;
+}
+
+.agent-step-list code {
+  grid-column: 1 / -1;
+  display: block;
+  max-width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(36, 49, 63, 0.06);
+  color: #42586c;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .agent-debug-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-step-list li {
+    grid-template-columns: 1fr;
+  }
+}

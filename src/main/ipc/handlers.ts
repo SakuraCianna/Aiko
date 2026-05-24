@@ -211,6 +211,10 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     return deps.agentRuntime.resetConversation();
   });
 
+  ipcMain.handle("agent:debug-snapshot", () => {
+    return deps.agentRuntime.listAgentDebugSnapshot();
+  });
+
   ipcMain.handle("memory:list", () => {
     return {
       memories: deps.memoryRepository?.listMemories() ?? [],
@@ -511,7 +515,7 @@ function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
 
 // 判断传入值是否是受支持的面板名称.
 function isPanelName(value: unknown): value is PanelName {
-  return value === "chat" || value === "reminders" || value === "memory" || value === "settings";
+  return value === "chat" || value === "reminders" || value === "memory" || value === "agent" || value === "settings";
 }
 
 // 校验执行动作请求的基本结构和动作内容.

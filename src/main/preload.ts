@@ -37,6 +37,8 @@ const api: AikoApi = {
   listConversation: () => ipcRenderer.invoke("conversation:list"),
   // 清空当前短期对话上下文.
   resetConversation: () => ipcRenderer.invoke("conversation:reset"),
+  // 读取 Agent 调试快照, 用于管理面板观察运行链路.
+  getAgentDebugSnapshot: () => ipcRenderer.invoke("agent:debug-snapshot"),
   // 读取长期记忆和待确认记忆候选.
   listMemory: () => ipcRenderer.invoke("memory:list"),
   // 接受一条待确认记忆候选.

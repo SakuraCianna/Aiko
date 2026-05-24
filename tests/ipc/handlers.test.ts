@@ -74,6 +74,31 @@ describe("registerAikoHandlers pending action approvals", () => {
     expect(discardedThreadIds).toEqual([]);
     expect(electronMock.openPath).toHaveBeenCalledWith("C:\\Chrome\\chrome.exe");
   });
+
+  it("exposes the agent debug snapshot over IPC", async () => {
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications()
+    });
+
+    await expect(callHandler("agent:debug-snapshot")).resolves.toMatchObject({
+      runs: [],
+      actionJournal: [],
+      traces: [],
+      workers: []
+    });
+  });
 });
 
 function createRuntime(options: {
@@ -116,6 +141,14 @@ function createRuntime(options: {
     },
     listWorkers() {
       return [];
+    },
+    listAgentDebugSnapshot() {
+      return {
+        runs: [],
+        actionJournal: [],
+        traces: [],
+        workers: []
+      };
     }
   };
 }

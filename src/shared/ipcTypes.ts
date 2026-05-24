@@ -1,6 +1,6 @@
 import type { ChatPayload } from "./chatPayload";
 
-export type PanelName = "chat" | "reminders" | "memory" | "settings";
+export type PanelName = "chat" | "reminders" | "memory" | "agent" | "settings";
 
 export type PendingActionApprovalDto = {
   mode: "passive" | "interrupt";
@@ -125,6 +125,59 @@ export type ConversationSnapshotDto = {
   maxContextChars: number;
 };
 
+export type AikoRunStatusDto = "accepted" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+
+export type AikoRunRecordDto = {
+  id: string;
+  sessionId: string;
+  status: AikoRunStatusDto;
+  userText: string;
+  createdAt: string;
+  updatedAt: string;
+  summary?: string;
+  error?: string;
+};
+
+export type AikoActionJournalEntryDto = {
+  id: string;
+  phase: "planned" | "approval" | "execution";
+  actionId: string;
+  runId?: string;
+  capability: string;
+  target: string;
+  risk: "low" | "medium" | "high";
+  source?: string;
+  decision?: "approved" | "rejected" | "cancelled";
+  ok?: boolean;
+  message?: string;
+  createdAt: string;
+};
+
+export type AikoTraceEventDto = {
+  name: string;
+  at: string;
+  data?: Record<string, unknown>;
+};
+
+export type AikoTraceRecordDto = {
+  requestId: string;
+  startedAt: string;
+  endedAt: string | null;
+  events: AikoTraceEventDto[];
+};
+
+export type AikoWorkerSummaryDto = {
+  name: string;
+  description: string;
+};
+
+export type AikoAgentDebugSnapshotDto = {
+  runs: AikoRunRecordDto[];
+  actionJournal: AikoActionJournalEntryDto[];
+  traces: AikoTraceRecordDto[];
+  workers: AikoWorkerSummaryDto[];
+};
+
 export type AikoApi = {
   ping: () => Promise<{ ok: true; value: "pong" }>;
   setClickThrough: (enabled: boolean) => Promise<void>;
@@ -139,6 +192,7 @@ export type AikoApi = {
   cancelAction: (request: CancelActionRequest) => Promise<ExecuteActionResponse>;
   listConversation: () => Promise<ConversationSnapshotDto>;
   resetConversation: () => Promise<ConversationSnapshotDto>;
+  getAgentDebugSnapshot: () => Promise<AikoAgentDebugSnapshotDto>;
   listMemory: () => Promise<MemorySnapshotDto>;
   acceptMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
   rejectMemoryCandidate: (candidateId: string) => Promise<{ ok: boolean; message: string }>;
