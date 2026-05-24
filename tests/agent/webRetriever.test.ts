@@ -6,13 +6,17 @@ import {
 } from "../../src/main/agent/retriever/webRetriever";
 
 describe("shouldUseWebSearch", () => {
-  it("detects user requests that need live web search", () => {
+  it("detects explicit search requests and explicit news requests", () => {
     expect(shouldUseWebSearch("帮我联网查一下 LangChain MCP 最新文档")).toBe(true);
+    expect(shouldUseWebSearch("今天新闻是什么")).toBe(true);
     expect(shouldUseWebSearch("今天有什么 AI 新闻")).toBe(true);
     expect(shouldUseWebSearch("帮我写一份项目文档")).toBe(false);
     expect(shouldUseWebSearch("陪我聊会儿")).toBe(false);
+    expect(shouldUseWebSearch("今天要做什么")).toBe(false);
+    expect(shouldUseWebSearch("这个项目的新闻模块怎么设计")).toBe(false);
+    expect(shouldUseWebSearch("当前版本怎么设计")).toBe(false);
+    expect(shouldUseWebSearch("这个东西价格怎么定")).toBe(false);
     expect(shouldUseWebSearch("查一下北京今天的天气")).toBe(false);
-    expect(shouldUseWebSearch("历史上的今天发生了什么")).toBe(false);
   });
 });
 
@@ -41,7 +45,7 @@ describe("createWebRetriever", () => {
     expect(result?.results).toHaveLength(1);
   });
 
-  it("adds the current date to broad today news queries", async () => {
+  it("adds the current date to explicit today news queries", async () => {
     const search = vi.fn(async () => [
       {
         title: "News",
@@ -56,11 +60,11 @@ describe("createWebRetriever", () => {
     });
 
     await retriever.retrieve({
-      userText: "今天的新闻是什么",
+      userText: "今天新闻是什么",
       userTranscript: ""
     });
 
-    expect(search).toHaveBeenCalledWith("今天的新闻是什么 2026年5月23日", { maxResults: 5 });
+    expect(search).toHaveBeenCalledWith("今天新闻是什么 2026年5月23日", { maxResults: 5 });
   });
 
   it("does not call the provider for ordinary chat", async () => {

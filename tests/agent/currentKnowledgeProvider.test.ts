@@ -6,27 +6,15 @@ import {
 } from "../../src/main/agent/knowledge/currentKnowledgeProvider";
 
 describe("detectCurrentKnowledgeIntent", () => {
-  it("detects fixed current-knowledge requests without sending broad news to web search", () => {
+  it("only detects Open-Meteo weather as a fixed current-knowledge request", () => {
     expect(detectCurrentKnowledgeIntent("查一下北京今天的天气")).toMatchObject({
       kind: "weather",
       location: "北京"
     });
-    expect(detectCurrentKnowledgeIntent("历史上的今天发生了什么")).toMatchObject({
-      kind: "today_history"
-    });
-    expect(detectCurrentKnowledgeIntent("美元兑人民币汇率是多少")).toMatchObject({
-      kind: "exchange_rate",
-      base: "USD",
-      symbols: ["CNY"]
-    });
-    expect(detectCurrentKnowledgeIntent("今年中国节假日")).toMatchObject({
-      kind: "public_holidays",
-      countryCode: "CN"
-    });
-    expect(detectCurrentKnowledgeIntent("上海今天日出日落时间")).toMatchObject({
-      kind: "sun_times",
-      location: "上海"
-    });
+    expect(detectCurrentKnowledgeIntent("历史上的今天发生了什么")).toBeNull();
+    expect(detectCurrentKnowledgeIntent("美元兑人民币汇率是多少")).toBeNull();
+    expect(detectCurrentKnowledgeIntent("今年中国节假日")).toBeNull();
+    expect(detectCurrentKnowledgeIntent("上海今天日出日落时间")).toBeNull();
     expect(detectCurrentKnowledgeIntent("今天有什么新闻")).toBeNull();
   });
 });
@@ -90,86 +78,17 @@ describe("createCurrentKnowledgeProvider", () => {
     expect(formatCurrentKnowledgeContext(context)).toContain("Open-Meteo");
   });
 
-  it("uses free fixed-output APIs for history, rates, holidays and sun times", async () => {
-    const fetchImpl = vi.fn(async (url: string | URL) => {
-      const href = String(url);
-      if (href.includes("history.muffinlabs.com")) {
-        return jsonResponse({
-          date: "May 23",
-          data: {
-            Events: [
-              {
-                year: "1618",
-                text: "The Second Defenestration of Prague occurs.",
-                links: [{ title: "Second Defenestration of Prague", link: "https://example.com/history" }]
-              }
-            ]
-          }
-        });
-      }
-
-      if (href.includes("api.frankfurter.dev")) {
-        return jsonResponse({
-          date: "2026-05-22",
-          amount: 1,
-          base: "USD",
-          rates: {
-            CNY: 7.24
-          }
-        });
-      }
-
-      if (href.includes("date.nager.at")) {
-        return jsonResponse([
-          {
-            date: "2026-01-01",
-            localName: "元旦",
-            name: "New Year's Day"
-          }
-        ]);
-      }
-
-      if (href.includes("geocoding-api.open-meteo.com")) {
-        return jsonResponse({
-          results: [{ name: "Shanghai", country: "China", latitude: 31.2304, longitude: 121.4737 }]
-        });
-      }
-
-      if (href.includes("api.sunrise-sunset.org")) {
-        return jsonResponse({
-          status: "OK",
-          results: {
-            sunrise: "4:54:00 AM",
-            sunset: "6:49:00 PM",
-            solar_noon: "11:51:30 AM",
-            day_length: "13:55:00"
-          }
-        });
-      }
-
-      throw new Error(`unexpected url: ${href}`);
+  it("does not call removed fixed-output APIs", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("removed APIs should not be called");
     });
-    const provider = createCurrentKnowledgeProvider({
-      fetch: fetchImpl,
-      now: () => new Date("2026-05-23T10:00:00.000+08:00")
-    });
+    const provider = createCurrentKnowledgeProvider({ fetch: fetchImpl });
 
-    await expect(provider.retrieve({ userText: "历史上的今天发生了什么", userTranscript: "" })).resolves.toMatchObject({
-      kind: "today_history",
-      source: "History.muffinlabs"
-    });
-    await expect(provider.retrieve({ userText: "美元兑人民币汇率是多少", userTranscript: "" })).resolves.toMatchObject({
-      kind: "exchange_rate",
-      summary: expect.stringContaining("7.24")
-    });
-    await expect(provider.retrieve({ userText: "今年中国节假日", userTranscript: "" })).resolves.toMatchObject({
-      kind: "public_holidays",
-      summary: expect.stringContaining("元旦")
-    });
-    await expect(provider.retrieve({ userText: "上海今天日出日落时间", userTranscript: "" })).resolves.toMatchObject({
-      kind: "sun_times",
-      title: "Shanghai, China 日出日落"
-    });
+    await expect(provider.retrieve({ userText: "历史上的今天发生了什么", userTranscript: "" })).resolves.toBeNull();
+    await expect(provider.retrieve({ userText: "美元兑人民币汇率是多少", userTranscript: "" })).resolves.toBeNull();
+    await expect(provider.retrieve({ userText: "今年中国节假日", userTranscript: "" })).resolves.toBeNull();
+    await expect(provider.retrieve({ userText: "上海今天日出日落时间", userTranscript: "" })).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
