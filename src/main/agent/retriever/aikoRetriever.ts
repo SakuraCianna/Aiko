@@ -6,6 +6,8 @@ import { formatCurrentKnowledgeContext } from "../knowledge/currentKnowledgeProv
 import type { CurrentKnowledgeContext, CurrentKnowledgeProvider } from "../knowledge/currentKnowledgeProvider";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
+import { createAikoActiveMemorySelector } from "../memory/activeMemory";
+import type { AikoActiveMemorySelector } from "../memory/activeMemory";
 import { createAikoMemoryAgent } from "../subagents/memoryAgent";
 import type { AikoMemoryAgent } from "../subagents/memoryAgent";
 import { createAikoResearchAgent } from "../subagents/researchAgent";
@@ -16,6 +18,7 @@ import type { WebResearchContext } from "./webTypes";
 
 export type AikoRetrieverOptions = {
   memoryAgent?: AikoMemoryAgent;
+  activeMemorySelector?: AikoActiveMemorySelector;
   memoryRuntime?: AikoMemoryRuntime;
   researchAgent?: AikoResearchAgent;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
@@ -35,6 +38,7 @@ export type AikoRetrieverRequestOptions = {
 // 创建 Retriever, 负责准备模型可用的上下文.
 export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetriever {
   const memoryAgent = options.memoryAgent ?? createAikoMemoryAgent({ memoryRuntime: options.memoryRuntime });
+  const activeMemorySelector = options.activeMemorySelector ?? createAikoActiveMemorySelector({ memoryAgent });
   const researchAgent =
     options.researchAgent ??
     createAikoResearchAgent({
@@ -51,7 +55,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
       const [memories, research] = await Promise.all([
-        memoryAgent.recall(userTranscript, 5),
+        activeMemorySelector.select(userTranscript),
         researchAgent.retrieve({ userText: payload.text, userTranscript }, requestOptions)
       ]);
       const { webResearch, currentKnowledge } = research;

@@ -12,6 +12,9 @@ import {
   isSimpleGreetingRequest,
   shouldPreferDesktopMarkdownResponse
 } from "../../src/main/agent/aikoAgentRuntime";
+import { createAikoCommitmentService } from "../../src/main/agent/commitments/commitmentService";
+import { createAikoActionJournal } from "../../src/main/agent/runtime/actionJournal";
+import { createAikoRuntimeHooks } from "../../src/main/agent/runtime/runtimeHooks";
 import { createAikoTraceRecorder } from "../../src/main/agent/trace/aikoTrace";
 import { isAutoExecutableDesktopMarkdownAction } from "../../src/main/actions/localActionTrust";
 import { buildAikoSystemPrompt, loadAikoPersonaPrompt } from "../../src/main/ai/prompts";
@@ -296,8 +299,8 @@ describe("createAikoAgentRuntime", () => {
 
     const firstResponse = runtime.respond(textPayload("请帮我处理应用 A"));
     const secondResponse = runtime.respond(textPayload("请帮我处理应用 B"));
-    await secondGate.promise;
     firstGate.release();
+    await secondGate.promise;
 
     await expect(firstResponse).resolves.toMatchObject({
       pendingAction: {
@@ -925,6 +928,144 @@ describe("createAikoAgentRuntime", () => {
       }
     });
   });
+
+  it("serializes runtime requests and exposes lifecycle snapshots", async () => {
+    const firstGate = createGate();
+    const order: string[] = [];
+    let factoryCalls = 0;
+    const runtime = createAikoAgentRuntime({
+      agentFactory() {
+        factoryCalls += 1;
+        const requestIndex = factoryCalls;
+        return {
+          async invoke() {
+            if (requestIndex === 1) {
+              order.push("first:start");
+              await firstGate.promise;
+              order.push("first:end");
+              return { messages: [{ role: "assistant", content: "first done" }] };
+            }
+            order.push("second:start");
+            return { messages: [{ role: "assistant", content: "second done" }] };
+          }
+        };
+      }
+    });
+
+    const first = runtime.respond(textPayload("first"));
+    const second = runtime.respond(textPayload("second"));
+    await waitUntil(() => order.length === 1);
+
+    expect(order).toEqual(["first:start"]);
+    expect(runtime.listRuns()[0]).toMatchObject({ status: "running", userText: "first" });
+
+    firstGate.release();
+    await expect(first).resolves.toEqual({ message: "first done" });
+    await expect(second).resolves.toEqual({ message: "second done" });
+    expect(order).toEqual(["first:start", "first:end", "second:start"]);
+    expect(runtime.listRuns().map((run) => run.status)).toEqual(["completed", "completed"]);
+  });
+
+  it("records pending actions and approval decisions in the action journal", async () => {
+    const journal = createAikoActionJournal({
+      idFactory: (() => {
+        let index = 0;
+        return () => `journal_${++index}`;
+      })(),
+      actionIdFactory: () => "action_open_cursor"
+    });
+    const runtime = createAikoAgentRuntime({
+      actionJournal: journal,
+      approvalThreadIdFactory: () => "approval-journal",
+      agent: {
+        async invoke() {
+          throw new Error("deterministic action should not call model");
+        }
+      }
+    });
+
+    const response = await runtime.respond(textPayload("https://example.com"));
+    await runtime.resumePendingActionApproval(response.pendingAction!, { type: "approve" });
+
+    expect(journal.list()).toEqual([
+      expect.objectContaining({
+        phase: "planned",
+        actionId: "action_open_cursor",
+        capability: "open_url",
+        target: "https://example.com"
+      }),
+      expect.objectContaining({
+        phase: "approval",
+        actionId: "action_open_cursor",
+        decision: "approved"
+      })
+    ]);
+  });
+
+  it("captures soft commitments after a normal chat reply", async () => {
+    const commitmentService = createAikoCommitmentService({
+      idFactory: () => "commitment_runtime",
+      now: () => new Date("2026-05-24T10:00:00.000Z")
+    });
+    const runtime = createAikoAgentRuntime({
+      commitmentService,
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: "I will keep that in mind." }] };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("I have an interview tomorrow afternoon."));
+
+    expect(runtime.listCommitments()).toEqual([
+      expect.objectContaining({
+        id: "commitment_runtime",
+        status: "active",
+        dueAt: "2026-05-25T10:00:00.000Z"
+      })
+    ]);
+  });
+
+  it("emits model-call runtime hooks around LangChain requests", async () => {
+    const hooks = createAikoRuntimeHooks();
+    const events: string[] = [];
+    hooks.on("before_model_call", (event) => {
+      events.push(`before:${event.runId}`);
+    });
+    hooks.on("after_model_call", (event) => {
+      events.push(`after:${event.runId}`);
+    });
+    const runtime = createAikoAgentRuntime({
+      hooks,
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: "hooked" }] };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("please make a small study plan with hooks"));
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatch(/^before:run_/);
+    expect(events[1]).toBe(events[0]!.replace("before:", "after:"));
+  });
+
+  it("advertises internal worker boundaries without exposing extra personas", () => {
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return { messages: [] };
+        }
+      }
+    });
+
+    expect(runtime.listWorkers()).toEqual([
+      expect.objectContaining({ name: "memory_worker" }),
+      expect.objectContaining({ name: "action_journal_worker" })
+    ]);
+  });
 });
 
 describe("extractAssistantText", () => {
@@ -983,4 +1124,14 @@ function createGate() {
     promise,
     release
   };
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("condition was not met in time");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }

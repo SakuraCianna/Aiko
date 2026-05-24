@@ -105,6 +105,21 @@ describe("createAikoRetriever", () => {
     ]);
   });
 
+  it("uses active memory selector as the pre-model memory boundary", async () => {
+    const retriever = createAikoRetriever({
+      activeMemorySelector: {
+        async select(query: string) {
+          return [{ id: "active_1", type: "preference", content: `active:${query}` }];
+        }
+      }
+    });
+
+    const context = await retriever.retrieve(textPayload("focus plan"));
+
+    expect(context.memories).toEqual([{ id: "active_1", type: "preference", content: "active:focus plan" }]);
+    expect(JSON.stringify(context.userContent)).toContain("active:focus plan");
+  });
+
   it("adds Tavily web context as untrusted grounding when a web retriever is configured", async () => {
     const retriever = createAikoRetriever({
       webRetriever: {

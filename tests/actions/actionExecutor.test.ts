@@ -1,8 +1,44 @@
 import { describe, expect, it } from "vitest";
 import { createActionExecutor } from "../../src/main/actions/actionExecutor";
+import { createAikoActionJournal } from "../../src/main/agent/runtime/actionJournal";
 import type { PendingActionDto } from "../../src/shared/ipcTypes";
 
 describe("createActionExecutor", () => {
+  it("records local execution results in the action journal", async () => {
+    const journal = createAikoActionJournal({ idFactory: () => "journal_execution" });
+    const executor = createActionExecutor({
+      actionJournal: journal,
+      now: () => new Date("2026-05-24T10:00:00.000Z"),
+      async openApplication() {
+        return false;
+      },
+      async openUrl() {
+        return;
+      }
+    });
+
+    await executor.execute({
+      remember: false,
+      action: {
+        id: "action_url",
+        title: "Open URL",
+        source: "test",
+        risk: "low",
+        capability: "open_url",
+        target: "https://example.com"
+      }
+    });
+
+    expect(journal.list()).toEqual([
+      expect.objectContaining({
+        phase: "execution",
+        actionId: "action_url",
+        capability: "open_url",
+        ok: true
+      })
+    ]);
+  });
+
   it("opens low-risk URLs through the injected capability", async () => {
     const opened: string[] = [];
     const executor = createActionExecutor({

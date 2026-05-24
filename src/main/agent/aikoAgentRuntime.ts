@@ -23,6 +23,8 @@ import type { MemoryCandidate } from "../memory/memoryTypes";
 import { extractMemoryCandidates } from "../memory/silentMemoryWorker";
 import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
+import { createAikoCommitmentService } from "./commitments/commitmentService";
+import type { AikoCommitment, AikoCommitmentService } from "./commitments/commitmentService";
 import {
   createAikoActionApprovalWorkflow,
   createAikoAgentWorkflow,
@@ -36,9 +38,17 @@ import {
 import { createCurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
 import type { CurrentKnowledgeProvider } from "./knowledge/currentKnowledgeProvider";
 import { createTavilyWebSearchProvider } from "./mcp/tavilyMcpProvider";
+import { createDefaultCapabilityPolicy } from "./policy/capabilityPolicy";
+import type { AikoCapabilityPolicy } from "./policy/capabilityPolicy";
 import { buildSearchUrl, createAikoPlanner } from "./planner/aikoPlanner";
 import { createAikoRetriever } from "./retriever/aikoRetriever";
 import { createWebRetriever } from "./retriever/webRetriever";
+import { createAikoActionJournal } from "./runtime/actionJournal";
+import type { AikoActionJournal, AikoActionJournalEntry } from "./runtime/actionJournal";
+import { createAikoRunLifecycle } from "./runtime/runLifecycle";
+import type { AikoRunLifecycle, AikoRunRecord } from "./runtime/runLifecycle";
+import { createAikoRuntimeHooks } from "./runtime/runtimeHooks";
+import type { AikoRuntimeHooks } from "./runtime/runtimeHooks";
 import { createAikoMemoryAgent } from "./subagents/memoryAgent";
 import type { AikoMemoryAgent, MemoryCandidateExtractor } from "./subagents/memoryAgent";
 import { createDefaultToolRegistry } from "./tools/toolRegistry";
@@ -46,6 +56,8 @@ import { createAikoTraceRecorder } from "./trace/aikoTrace";
 import type { AgentUserContent, AikoMemoryRuntime } from "./types";
 import type { AikoTraceRecorder } from "./trace/aikoTrace";
 import type { WebRetriever } from "./retriever/webRetriever";
+import { createAikoWorkerRegistry } from "./workers/workerRegistry";
+import type { AikoWorkerRegistry, AikoWorkerSummary } from "./workers/workerRegistry";
 
 type AgentInput = { messages: BaseMessageLike[] };
 type LangChainAgent = ReturnType<typeof createAgent>;
@@ -81,6 +93,10 @@ export type AikoAgentRuntime = {
   discardPendingActionApproval: (action: PendingActionDto) => void;
   listConversation: () => ConversationSnapshot;
   resetConversation: () => ConversationSnapshot;
+  listRuns: () => AikoRunRecord[];
+  listActionJournal: () => AikoActionJournalEntry[];
+  listCommitments: () => AikoCommitment[];
+  listWorkers: () => AikoWorkerSummary[];
 };
 
 export type AikoAgentRequestOptions = {
@@ -109,6 +125,12 @@ export type AikoAgentRuntimeOptions = {
   memoryCandidateExtractor?: MemoryCandidateExtractor;
   webRetriever?: WebRetriever;
   traceRecorder?: AikoTraceRecorder;
+  runLifecycle?: AikoRunLifecycle;
+  actionJournal?: AikoActionJournal;
+  commitmentService?: AikoCommitmentService;
+  hooks?: AikoRuntimeHooks;
+  workerRegistry?: AikoWorkerRegistry;
+  capabilityPolicy?: AikoCapabilityPolicy;
   currentKnowledgeProvider?: CurrentKnowledgeProvider;
   approvalMode?: AikoAgentWorkflowApprovalMode;
   approvalThreadIdFactory?: () => string;
@@ -144,16 +166,25 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     currentKnowledgeProvider
   });
   const planner = createAikoPlanner();
-  const executor = createAikoExecutor();
+  const capabilityPolicy = options.capabilityPolicy ?? createDefaultCapabilityPolicy();
+  const executor = createAikoExecutor(capabilityPolicy);
   const traceRecorder = options.traceRecorder ?? createAikoTraceRecorder();
+  const runLifecycle = options.runLifecycle ?? createAikoRunLifecycle();
+  const actionJournal = options.actionJournal ?? createAikoActionJournal();
+  const commitmentService = options.commitmentService ?? createAikoCommitmentService();
+  const hooks = options.hooks ?? createAikoRuntimeHooks();
+  const workerRegistry = options.workerRegistry ?? createAikoWorkerRegistry();
+  registerDefaultWorkers(workerRegistry);
   const approvalMode = options.approvalMode ?? "interrupt";
   const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
   const approvalSessions = new Map<string, AikoAgentWorkflow | AikoActionApprovalWorkflow>();
+  const approvalThreadRuns = new Map<string, string>();
   // 处理一次普通或流式聊天请求.
   async function respondInternal(
     payload: ChatPayload,
     onDelta?: (text: string) => void,
-    requestOptions: AikoAgentRequestOptions = {}
+    requestOptions: AikoAgentRequestOptions = {},
+    runId?: string
   ): Promise<ChatResponse> {
     const signal = requestOptions.signal;
     if (isAbortSignalAborted(signal)) return { message: STREAM_CANCELLED_MESSAGE };
@@ -215,7 +246,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const reviewPayload = readWorkflowInterruptPayload(workflowOutput);
       if (!reviewPayload) throw new Error("Aiko workflow interrupted without a pending action payload");
       approvalSessions.set(approvalThreadId, workflow);
-      const action = attachWorkflowApproval(reviewPayload.action, approvalThreadId);
+      const action = trackPendingAction(attachWorkflowApproval(reviewPayload.action, approvalThreadId), runId, "workflow");
       emitDelta(reviewPayload.message);
       trace.add("executor.prepared", {
         capability: action.capability,
@@ -229,7 +260,11 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     throwIfAborted(signal);
     if (proposal.kind === "pending_actions") {
       const batchAction = createBatchAction(proposal.message, context.userTranscript, proposal.actions);
-      const approvedAction = await preparePendingActionApproval(proposal.message, batchAction);
+      const approvedAction = trackPendingAction(
+        await preparePendingActionApproval(proposal.message, batchAction),
+        runId,
+        "executor.batch"
+      );
       emitDelta(proposal.message);
       trace.add("executor.prepared_batch", {
         actionCount: proposal.actions.length,
@@ -241,14 +276,15 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     if (proposal.kind === "pending_action") {
+      const action = trackPendingAction(proposal.action, runId, "executor");
       emitDelta(proposal.message);
       trace.add("executor.prepared", {
-        capability: proposal.action.capability,
-        risk: proposal.action.risk
+        capability: action.capability,
+        risk: action.risk
       });
       trace.end({ mode: "action" });
       rememberConversationTurn(context.userTranscript, proposal.message);
-      return respondWithAction(proposal.message, proposal.action);
+      return respondWithAction(proposal.message, action);
     }
 
     if (proposal.kind === "blocked") {
@@ -266,7 +302,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         messages: [new HumanMessage({ content: withConversationContext(context.userContent) })]
       };
       const prefersDesktopMarkdown = shouldPreferDesktopMarkdownResponse(context.userText, context.userTranscript);
+      await hooks.emit({ name: "before_model_call", runId, payload: { userText: context.userText } });
       const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
+      await hooks.emit({ name: "after_model_call", runId, payload: { ok: true } });
       throwIfAborted(signal);
       const assistantText = extractAssistantText(result);
       const action = proposedActions.length > 1
@@ -280,9 +318,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       // 工具调用只生成待确认动作, 真正执行只能交给本地执行器.
       if (action) {
         const message = describeModelProposedAction(action);
-        const approvedAction = await preparePendingActionApproval(message, action);
+        const approvedAction = trackPendingAction(await preparePendingActionApproval(message, action), runId, "model.tool");
         if (!assistantText) emitDelta(message);
-        await memoryAgent.rememberExchange(context.userTranscript, assistantText || message);
+        await rememberLongTermContext(context.userTranscript, assistantText || message, runId);
         trace.end({ mode: "tool_action" });
         rememberConversationTurn(context.userTranscript, assistantText || message);
         return respondWithAction(message, approvedAction);
@@ -291,8 +329,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const markdownAction = createDesktopMarkdownAction(context.userTranscript || context.userText, assistantText, prefersDesktopMarkdown);
       if (markdownAction) {
         const message = describePendingAction(markdownAction);
-        const approvedAction = await preparePendingActionApproval(message, markdownAction);
-        await memoryAgent.rememberExchange(context.userTranscript, assistantText);
+        const approvedAction = trackPendingAction(await preparePendingActionApproval(message, markdownAction), runId, "runtime.markdown");
+        await rememberLongTermContext(context.userTranscript, assistantText, runId);
         trace.end({ mode: "markdown_action" });
         rememberConversationTurn(context.userTranscript, message);
         return respondWithAction(message, approvedAction);
@@ -300,7 +338,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
 
       const message = assistantText || describeEmptyAssistantReply();
       if (!assistantText) emitDelta(message);
-      await memoryAgent.rememberExchange(context.userTranscript, message);
+      await rememberLongTermContext(context.userTranscript, message, runId);
       trace.end({ mode: "chat" });
       rememberConversationTurn(context.userTranscript, message);
       return { message };
@@ -320,13 +358,47 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
   }
 
+  // 通过生命周期队列包裹每次请求, 保证同一桌宠会话内的运行顺序稳定.
+  async function respondWithLifecycle(
+    payload: ChatPayload,
+    onDelta?: (text: string) => void,
+    requestOptions: AikoAgentRequestOptions = {}
+  ): Promise<ChatResponse> {
+    const run = runLifecycle.createRun({
+      sessionId: "chat",
+      userText: payload.text || describeAttachmentOnlyPayload(payload)
+    });
+
+    return runLifecycle.enqueue(async () => {
+      runLifecycle.markRunning(run.id);
+      try {
+        const response = await respondInternal(payload, onDelta, requestOptions, run.id);
+        if (response.message === STREAM_CANCELLED_MESSAGE) {
+          runLifecycle.markCancelled(run.id, response.message);
+        } else if (response.pendingAction) {
+          runLifecycle.markWaitingApproval(run.id, response.pendingAction.title);
+        } else {
+          runLifecycle.markCompleted(run.id, response.message.slice(0, 200));
+        }
+        return response;
+      } catch (error) {
+        runLifecycle.markFailed(run.id, error);
+        throw error;
+      }
+    });
+  }
+
   return {
-    respond: (payload) => respondInternal(payload),
-    respondStream: (payload, onDelta, requestOptions) => respondInternal(payload, onDelta, requestOptions),
+    respond: (payload) => respondWithLifecycle(payload),
+    respondStream: (payload, onDelta, requestOptions) => respondWithLifecycle(payload, onDelta, requestOptions),
     resumePendingActionApproval,
     discardPendingActionApproval,
     listConversation,
-    resetConversation
+    resetConversation,
+    listRuns: () => runLifecycle.listRuns(),
+    listActionJournal: () => actionJournal.list(),
+    listCommitments: () => commitmentService.list(),
+    listWorkers: () => workerRegistry.list()
   };
 
   // 将当前短期上下文注入模型输入, 不影响长期记忆.
@@ -381,6 +453,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   function resetConversation(): ConversationSnapshot {
     conversationMessages.length = 0;
     approvalSessions.clear();
+    approvalThreadRuns.clear();
     return listConversation();
   }
 
@@ -406,6 +479,20 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     }
 
     approvalSessions.delete(threadId);
+    const runId = approvalThreadRuns.get(threadId);
+    approvalThreadRuns.delete(threadId);
+    actionJournal.recordApproval({
+      action,
+      decision: decision.type === "reject" ? "rejected" : "approved",
+      reason: decision.type === "reject" ? decision.reason : decision.type
+    });
+    if (runId) {
+      if (decision.type === "reject") {
+        runLifecycle.markCancelled(runId, decision.reason ?? "approval rejected");
+      } else {
+        runLifecycle.markCompleted(runId, "approval reviewed");
+      }
+    }
     return { ok: true, message: "LangGraph approval resumed." };
   }
 
@@ -414,6 +501,10 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     const threadId = action.approval?.threadId;
     if (!threadId) return;
     approvalSessions.delete(threadId);
+    const runId = approvalThreadRuns.get(threadId);
+    approvalThreadRuns.delete(threadId);
+    actionJournal.recordApproval({ action, decision: "cancelled", reason: "discarded" });
+    if (runId) runLifecycle.markCancelled(runId, "approval discarded");
   }
 
   // 为模型工具和后置生成的本地动作创建同样的 LangGraph interrupt 审批会话.
@@ -435,9 +526,51 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     approvalSessions.set(threadId, workflow);
     return attachWorkflowApproval(action, threadId);
   }
+
+  // 给待确认动作补充 ID, 记录日志, 并把审批线程映射回运行生命周期.
+  function trackPendingAction(action: PendingActionDto, runId: string | undefined, source: string): PendingActionDto {
+    const trackedAction = isAutoExecutableDesktopMarkdownAction(action)
+      ? markAutoExecutableDesktopMarkdownAction(actionJournal.ensureActionId(action))
+      : actionJournal.ensureActionId(action);
+    actionJournal.recordPlanned({ runId, action: trackedAction, source });
+    const threadId = trackedAction.approval?.threadId;
+    if (threadId && runId) approvalThreadRuns.set(threadId, runId);
+    return trackedAction;
+  }
+
+  // 统一处理对话后的长期记忆和软承诺捕获.
+  async function rememberLongTermContext(userTranscript: string, assistantText: string, runId?: string) {
+    await memoryAgent.rememberExchange(userTranscript, assistantText);
+    commitmentService.captureFromExchange(userTranscript, assistantText);
+    await hooks.emit({ name: "after_memory_write", runId, payload: { userTranscript } });
+  }
+
+  // 注册默认内部 worker 摘要, 对外仍然只呈现 Aiko 一个角色.
+  function registerDefaultWorkers(registry: AikoWorkerRegistry) {
+    registry.register({
+      name: "memory_worker",
+      description: "Selects and writes long-term companion memory.",
+      async run(input) {
+        return memoryAgent.recall(String(input ?? ""), 5);
+      }
+    });
+    registry.register({
+      name: "action_journal_worker",
+      description: "Reads planned, approved, and executed local actions.",
+      run() {
+        return actionJournal.list();
+      }
+    });
+  }
 }
 
 // 构建主模型优先的模型路由, 去重后依次尝试备用模型.
+// 给纯附件请求生成生命周期摘要, 避免运行记录为空.
+function describeAttachmentOnlyPayload(payload: ChatPayload) {
+  if (payload.attachments.length === 0) return "";
+  return `attachments:${payload.attachments.length}`;
+}
+
 export function buildGlmModelRoute(primaryModel: string, fallbackModels: string[] = []): string[] {
   const route: string[] = [];
   const seen = new Set<string>();

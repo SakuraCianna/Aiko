@@ -18,11 +18,13 @@ import {
   type Reminder,
 } from "../reminders/reminderService";
 import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 
 export type ActionExecutorDeps = {
   openUrl: (url: string) => Promise<void>;
   openApplication: (query: string, expectedPath?: string) => Promise<boolean>;
   writeDesktopMarkdown?: DesktopMarkdownWriter;
+  actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
   now: () => Date;
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   permissionRepository?: Pick<
@@ -44,11 +46,14 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     ): Promise<ExecuteActionResponse> {
       const { action, remember } = request;
 
+      let result: ExecuteActionResponse;
       try {
-        return await executeSafely(action, remember);
+        result = await executeSafely(action, remember);
       } catch {
-        return { ok: false, message: describeActionFailure(action, "execution_failed") };
+        result = { ok: false, message: describeActionFailure(action, "execution_failed") };
       }
+      deps.actionJournal?.recordExecutionResult({ action, ...result });
+      return result;
     },
 
     // 列出当前执行器可见的提醒.

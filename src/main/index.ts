@@ -2,6 +2,7 @@ import { app, type BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
+import { createAikoActionJournal } from "./agent/runtime/actionJournal";
 import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
@@ -28,7 +29,8 @@ void app.whenReady().then(() => {
   const config = loadConfig();
   database = openDatabase();
   const memoryRepository = createMemoryRepository(database.db);
-  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository });
+  const actionJournal = createAikoActionJournal();
+  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository, actionJournal });
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
   const applicationPreferenceRepository = createApplicationPreferenceRepository(database.db);
@@ -39,6 +41,7 @@ void app.whenReady().then(() => {
   attachRendererDiagnostics("panel", panelWindow);
   registerAikoHandlers({
     agentRuntime,
+    actionJournal,
     petWindow,
     panelWindow,
     memoryRepository,

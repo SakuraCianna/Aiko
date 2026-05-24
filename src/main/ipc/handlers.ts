@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, screen, type WebContents } from "electron";
 import { resolveOpenApplicationAction } from "../actions/applicationActionPolicy";
 import { createActionExecutor } from "../actions/actionExecutor";
 import { isConversationResetRequest, type AikoAgentRuntime } from "../agent/aikoAgentRuntime";
+import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import { discoverApplications } from "../capabilities/applicationCatalog";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
@@ -25,6 +26,7 @@ import type {
 
 export type AikoHandlerDeps = {
   agentRuntime: AikoAgentRuntime;
+  actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
   petWindow: BrowserWindow;
   panelWindow: BrowserWindow;
   memoryRepository?: Pick<MemoryRepository, "listMemories" | "listPendingCandidates" | "acceptCandidate" | "rejectCandidate">;
@@ -52,6 +54,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     openUrl,
     openApplication: (query, expectedPath) => openApplication(getApplications(), query, expectedPath),
     writeDesktopMarkdown,
+    actionJournal: deps.actionJournal,
     now: () => new Date(),
     applicationPreferenceRepository: deps.applicationPreferenceRepository,
     permissionRepository: deps.permissionRepository,
