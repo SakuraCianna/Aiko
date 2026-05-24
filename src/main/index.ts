@@ -11,12 +11,14 @@ import { loadConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
 import {
+  createAuditRepository,
   createApplicationPreferenceRepository,
   createMemoryRepository,
   createPermissionRepository,
   createReminderRepository
 } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
+import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
 import { resolvePreloadPath } from "./windows/preloadPath";
@@ -34,10 +36,19 @@ void app.whenReady().then(() => {
   const config = loadConfig();
   database = openDatabase();
   const memoryRepository = createMemoryRepository(database.db);
-  const actionJournal = createAikoActionJournal();
+  const auditRepository = createAuditRepository(database.db);
+  const actionJournal = createAikoActionJournal({ store: auditRepository });
+  const traceRecorder = createAikoTraceRecorder({ store: auditRepository });
   const commitmentService = createAikoCommitmentService();
   const hooks = createAikoRuntimeHooks();
-  const agentRuntime = createAikoAgentRuntime({ config, memoryRuntime: memoryRepository, actionJournal, commitmentService, hooks });
+  const agentRuntime = createAikoAgentRuntime({
+    config,
+    memoryRuntime: memoryRepository,
+    actionJournal,
+    traceRecorder,
+    commitmentService,
+    hooks
+  });
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
   const applicationPreferenceRepository = createApplicationPreferenceRepository(database.db);

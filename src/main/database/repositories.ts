@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { AikoActionJournalEntry } from "../agent/runtime/actionJournal";
+import type { AikoTraceEvent, AikoTraceRecord } from "../agent/trace/aikoTrace";
 import { recallMemories, type RecalledMemory } from "../memory/memoryRecall";
 import type { MemoryCandidate, MemoryStatus } from "../memory/memoryTypes";
 import type { PermissionRule } from "../permissions/permissionService";
@@ -18,6 +20,7 @@ export type PermissionRepository = ReturnType<typeof createPermissionRepository>
 export type ReminderRepository = ReturnType<typeof createReminderRepository>;
 export type MemoryRepository = ReturnType<typeof createMemoryRepository>;
 export type ApplicationPreferenceRepository = ReturnType<typeof createApplicationPreferenceRepository>;
+export type AuditRepository = ReturnType<typeof createAuditRepository>;
 
 type MemoryRow = {
   id: string;
@@ -39,6 +42,193 @@ type MemoryCandidateRow = {
   status: MemoryStatus;
   created_at: string;
 };
+
+// 定义审计仓储读取 SQLite 行时使用的结构.
+type ActionJournalRow = {
+  id: string;
+  phase: AikoActionJournalEntry["phase"];
+  action_id: string;
+  run_id: string | null;
+  capability: string;
+  target: string;
+  risk: AikoActionJournalEntry["risk"];
+  source: string | null;
+  decision: AikoActionJournalEntry["decision"] | null;
+  ok: 0 | 1 | null;
+  message: string | null;
+  created_at: string;
+};
+
+type TraceRow = {
+  request_id: string;
+  started_at: string;
+  ended_at: string | null;
+};
+
+type TraceEventRow = {
+  trace_request_id: string;
+  name: string;
+  at: string;
+  data_json: string | null;
+};
+
+// 创建审计仓库, 负责持久化动作日志和 Agent trace.
+export function createAuditRepository(db: DatabaseSync) {
+  return {
+    // 保存一条动作审计日志.
+    recordActionJournalEntry(entry: AikoActionJournalEntry) {
+      db.prepare(
+        `
+        INSERT INTO action_journal (
+          id,
+          phase,
+          action_id,
+          run_id,
+          capability,
+          target,
+          risk,
+          source,
+          decision,
+          ok,
+          message,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      ).run(
+        entry.id,
+        entry.phase,
+        entry.actionId,
+        entry.runId ?? null,
+        entry.capability,
+        entry.target,
+        entry.risk,
+        entry.source ?? null,
+        entry.decision ?? null,
+        typeof entry.ok === "boolean" ? (entry.ok ? 1 : 0) : null,
+        entry.message ?? null,
+        entry.createdAt
+      );
+    },
+
+    // 按时间顺序读取动作审计日志.
+    listActionJournal(): AikoActionJournalEntry[] {
+      const rows = db
+        .prepare(
+          `
+          SELECT id, phase, action_id, run_id, capability, target, risk, source, decision, ok, message, created_at
+          FROM action_journal
+          ORDER BY created_at ASC, rowid ASC
+        `
+        )
+        .all() as ActionJournalRow[];
+
+      return rows.map(mapActionJournalRow);
+    },
+
+    // 创建一条 trace 记录.
+    startTrace(trace: Pick<AikoTraceRecord, "requestId" | "startedAt">) {
+      db.prepare(
+        `
+        INSERT INTO agent_traces (request_id, started_at, ended_at)
+        VALUES (?, ?, NULL)
+        ON CONFLICT(request_id) DO UPDATE SET
+          started_at = excluded.started_at,
+          ended_at = NULL
+      `
+      ).run(trace.requestId, trace.startedAt);
+    },
+
+    // 为 trace 添加一条事件.
+    addTraceEvent(requestId: string, event: AikoTraceEvent) {
+      db.prepare(
+        `
+        INSERT INTO agent_trace_events (id, trace_request_id, name, at, data_json)
+        VALUES (?, ?, ?, ?, ?)
+      `
+      ).run(createId("trace_event"), requestId, event.name, event.at, event.data ? JSON.stringify(event.data) : null);
+    },
+
+    // 标记 trace 结束.
+    endTrace(requestId: string, endedAt: string) {
+      db.prepare("UPDATE agent_traces SET ended_at = ? WHERE request_id = ?").run(endedAt, requestId);
+    },
+
+    // 读取完整 trace 及事件列表.
+    listTraces(): AikoTraceRecord[] {
+      const traces = db
+        .prepare(
+          `
+          SELECT request_id, started_at, ended_at
+          FROM agent_traces
+          ORDER BY started_at ASC, rowid ASC
+        `
+        )
+        .all() as TraceRow[];
+      const events = db
+        .prepare(
+          `
+          SELECT trace_request_id, name, at, data_json
+          FROM agent_trace_events
+          ORDER BY at ASC, rowid ASC
+        `
+        )
+        .all() as TraceEventRow[];
+      const eventsByTrace = groupTraceEvents(events);
+
+      return traces.map((trace) => ({
+        requestId: trace.request_id,
+        startedAt: trace.started_at,
+        endedAt: trace.ended_at,
+        events: eventsByTrace.get(trace.request_id) ?? []
+      }));
+    }
+  };
+}
+
+// 将动作日志数据库行转为运行时结构.
+function mapActionJournalRow(row: ActionJournalRow): AikoActionJournalEntry {
+  return {
+    id: row.id,
+    phase: row.phase,
+    actionId: row.action_id,
+    runId: row.run_id ?? undefined,
+    capability: row.capability,
+    target: row.target,
+    risk: row.risk,
+    source: row.source ?? undefined,
+    decision: row.decision ?? undefined,
+    ok: row.ok === null ? undefined : Boolean(row.ok),
+    message: row.message ?? undefined,
+    createdAt: row.created_at
+  };
+}
+
+// 按 request id 聚合 trace 事件.
+function groupTraceEvents(rows: TraceEventRow[]): Map<string, AikoTraceEvent[]> {
+  const grouped = new Map<string, AikoTraceEvent[]>();
+  for (const row of rows) {
+    const events = grouped.get(row.trace_request_id) ?? [];
+    events.push({
+      name: row.name,
+      at: row.at,
+      data: parseTraceData(row.data_json)
+    });
+    grouped.set(row.trace_request_id, events);
+  }
+  return grouped;
+}
+
+// 安全解析 trace 事件数据, 坏数据降级为空对象.
+function parseTraceData(value: string | null): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // 创建长期记忆仓储, 负责候选记忆和已接受记忆的读写.
 export function createMemoryRepository(db: DatabaseSync) {

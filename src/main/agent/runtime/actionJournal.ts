@@ -24,9 +24,15 @@ export type AikoActionJournalOptions = {
   actionIdFactory?: () => string;
   now?: () => Date;
   maxRecords?: number;
+  store?: AikoActionJournalStore;
 };
 
 export type AikoActionJournal = ReturnType<typeof createAikoActionJournal>;
+
+export type AikoActionJournalStore = {
+  recordActionJournalEntry: (entry: AikoActionJournalEntry) => void;
+  listActionJournal: () => AikoActionJournalEntry[];
+};
 
 // 创建动作日志, 用于追踪规划, 审批和执行结果.
 export function createAikoActionJournal(options: AikoActionJournalOptions = {}) {
@@ -34,6 +40,7 @@ export function createAikoActionJournal(options: AikoActionJournalOptions = {}) 
   const actionIdFactory = options.actionIdFactory ?? (() => `action_${randomUUID()}`);
   const now = options.now ?? (() => new Date());
   const maxRecords = options.maxRecords ?? 200;
+  const store = options.store;
   const entries: AikoActionJournalEntry[] = [];
 
   return {
@@ -49,7 +56,7 @@ export function createAikoActionJournal(options: AikoActionJournalOptions = {}) 
 
     // 记录已经规划出的待执行动作.
     recordPlanned(input: { runId?: string; action: PendingActionDto; source: string }) {
-      record(entries, maxRecords, {
+      record(entries, maxRecords, store, {
         id: idFactory(),
         phase: "planned",
         actionId: readActionId(input.action),
@@ -64,7 +71,7 @@ export function createAikoActionJournal(options: AikoActionJournalOptions = {}) 
 
     // 记录用户或系统对待执行动作的审批决定.
     recordApproval(input: { action: PendingActionDto; decision: AikoActionApprovalDecision; reason?: string }) {
-      record(entries, maxRecords, {
+      record(entries, maxRecords, store, {
         id: idFactory(),
         phase: "approval",
         actionId: readActionId(input.action),
@@ -79,7 +86,7 @@ export function createAikoActionJournal(options: AikoActionJournalOptions = {}) 
 
     // 记录本地动作执行结果, 后续可以用于撤销, 重试和诊断.
     recordExecutionResult(input: { action: PendingActionDto } & ExecuteActionResponse) {
-      record(entries, maxRecords, {
+      record(entries, maxRecords, store, {
         id: idFactory(),
         phase: "execution",
         actionId: readActionId(input.action),
@@ -94,14 +101,21 @@ export function createAikoActionJournal(options: AikoActionJournalOptions = {}) 
 
     // 返回日志快照, 避免调用方直接修改内部数组.
     list() {
+      if (store) return store.listActionJournal();
       return entries.map((entry) => ({ ...entry }));
     }
   };
 }
 
 // 追加一条日志并限制最大数量.
-function record(entries: AikoActionJournalEntry[], maxRecords: number, entry: AikoActionJournalEntry) {
+function record(
+  entries: AikoActionJournalEntry[],
+  maxRecords: number,
+  store: AikoActionJournalStore | undefined,
+  entry: AikoActionJournalEntry
+) {
   entries.push(entry);
+  store?.recordActionJournalEntry(entry);
   while (entries.length > maxRecords) {
     entries.shift();
   }

@@ -48,5 +48,35 @@ export function runMigrations(db: DatabaseSync) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS action_journal (
+      id TEXT PRIMARY KEY,
+      phase TEXT NOT NULL,
+      action_id TEXT NOT NULL,
+      run_id TEXT,
+      capability TEXT NOT NULL,
+      target TEXT NOT NULL,
+      risk TEXT NOT NULL,
+      source TEXT,
+      decision TEXT,
+      ok INTEGER,
+      message TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_traces (
+      request_id TEXT PRIMARY KEY,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_trace_events (
+      id TEXT PRIMARY KEY,
+      trace_request_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      at TEXT NOT NULL,
+      data_json TEXT,
+      FOREIGN KEY(trace_request_id) REFERENCES agent_traces(request_id) ON DELETE CASCADE
+    );
   `);
 }

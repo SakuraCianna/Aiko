@@ -52,6 +52,34 @@ describe("createAikoActionJournal", () => {
 
     expect(journal.list().map((entry) => entry.target)).toEqual(["B", "C"]);
   });
+
+  it("mirrors entries into a persistent store when configured", () => {
+    const stored: unknown[] = [];
+    const journal = createAikoActionJournal({
+      idFactory: () => "journal_1",
+      now: () => new Date("2026-05-24T10:00:00.000Z"),
+      store: {
+        recordActionJournalEntry(entry) {
+          stored.push(entry);
+        },
+        listActionJournal() {
+          return stored as ReturnType<typeof journal.list>;
+        }
+      }
+    });
+
+    journal.recordExecutionResult({ action: openApplicationAction(), ok: true, message: "opened" });
+
+    expect(stored).toEqual([
+      expect.objectContaining({
+        id: "journal_1",
+        phase: "execution",
+        actionId: "action_1",
+        ok: true,
+        message: "opened"
+      })
+    ]);
+  });
 });
 
 function openApplicationAction(target = "Cursor"): PendingActionDto {

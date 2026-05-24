@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { runMigrations } from "../../src/main/database/migrations";
 import {
   createApplicationPreferenceRepository,
+  createAuditRepository,
   createMemoryRepository,
   createPermissionRepository,
   createReminderRepository
@@ -18,6 +19,74 @@ function createMemoryDatabase() {
 }
 
 describe("database repositories", () => {
+  it("persists action journal entries for audit history", () => {
+    const db = createMemoryDatabase();
+    const repository = createAuditRepository(db);
+
+    repository.recordActionJournalEntry({
+      id: "journal_1",
+      phase: "execution",
+      actionId: "action_1",
+      runId: "run_1",
+      capability: "open_application",
+      target: "Cursor",
+      risk: "low",
+      ok: true,
+      message: "opened",
+      createdAt: "2026-05-24T10:00:00.000Z"
+    });
+
+    expect(createAuditRepository(db).listActionJournal()).toEqual([
+      {
+        id: "journal_1",
+        phase: "execution",
+        actionId: "action_1",
+        runId: "run_1",
+        capability: "open_application",
+        target: "Cursor",
+        risk: "low",
+        ok: true,
+        message: "opened",
+        createdAt: "2026-05-24T10:00:00.000Z"
+      }
+    ]);
+
+    db.close();
+  });
+
+  it("persists agent traces and events for audit history", () => {
+    const db = createMemoryDatabase();
+    const repository = createAuditRepository(db);
+
+    repository.startTrace({
+      requestId: "request_1",
+      startedAt: "2026-05-24T10:00:00.000Z"
+    });
+    repository.addTraceEvent("request_1", {
+      name: "planner.completed",
+      at: "2026-05-24T10:00:01.000Z",
+      data: { mode: "chat" }
+    });
+    repository.endTrace("request_1", "2026-05-24T10:00:02.000Z");
+
+    expect(createAuditRepository(db).listTraces()).toEqual([
+      {
+        requestId: "request_1",
+        startedAt: "2026-05-24T10:00:00.000Z",
+        endedAt: "2026-05-24T10:00:02.000Z",
+        events: [
+          {
+            name: "planner.completed",
+            at: "2026-05-24T10:00:01.000Z",
+            data: { mode: "chat" }
+          }
+        ]
+      }
+    ]);
+
+    db.close();
+  });
+
   it("persists remembered permission rules case-insensitively", () => {
     const db = createMemoryDatabase();
     const repository = createPermissionRepository(db);

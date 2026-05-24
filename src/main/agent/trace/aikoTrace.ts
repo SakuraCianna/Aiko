@@ -21,45 +21,67 @@ export type AikoTraceRecorder = {
   list: () => AikoTraceRecord[];
 };
 
-// 创建内存 Trace 记录器, 用于调试 Agent 决策链路.
-export function createAikoTraceRecorder(): AikoTraceRecorder {
+export type AikoTraceStore = {
+  startTrace: (trace: Pick<AikoTraceRecord, "requestId" | "startedAt">) => void;
+  addTraceEvent: (requestId: string, event: AikoTraceEvent) => void;
+  endTrace: (requestId: string, endedAt: string) => void;
+  listTraces: () => AikoTraceRecord[];
+};
+
+export type AikoTraceRecorderOptions = {
+  now?: () => Date;
+  store?: AikoTraceStore;
+};
+
+// 创建 Trace 记录器, 同时支持内存快照和可选持久化 store.
+export function createAikoTraceRecorder(options: AikoTraceRecorderOptions = {}): AikoTraceRecorder {
+  const now = options.now ?? (() => new Date());
+  const store = options.store;
   const records: AikoTraceRecord[] = [];
 
   return {
     // 开始记录一次 Agent 请求.
     start(requestId = crypto.randomUUID()) {
+      const startedAt = now().toISOString();
       const record: AikoTraceRecord = {
         requestId,
-        startedAt: new Date().toISOString(),
+        startedAt,
         endedAt: null,
         events: []
       };
       records.push(record);
+      store?.startTrace({ requestId, startedAt });
 
       return {
         // 追加一个请求生命周期事件.
         add(name, data) {
-          record.events.push({
+          const event = {
             name,
-            at: new Date().toISOString(),
+            at: now().toISOString(),
             data
-          });
+          };
+          record.events.push(event);
+          store?.addTraceEvent(requestId, event);
         },
 
         // 结束当前请求并记录最终状态.
         end(data) {
-          record.endedAt = new Date().toISOString();
-          record.events.push({
+          record.endedAt = now().toISOString();
+          const event = {
             name: "request.completed",
             at: record.endedAt,
             data
-          });
+          };
+          record.events.push(event);
+          store?.endTrace(requestId, record.endedAt);
+          store?.addTraceEvent(requestId, event);
         }
       };
     },
 
     // 返回所有 Trace 快照.
     list() {
+      if (store) return store.listTraces();
       return records.map((record) => ({
         ...record,
         events: [...record.events]

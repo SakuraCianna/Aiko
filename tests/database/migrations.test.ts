@@ -16,6 +16,9 @@ describe("runMigrations", () => {
       .all() as Array<{ name: string }>;
 
     expect(rows.map((row) => row.name)).toEqual([
+      "action_journal",
+      "agent_trace_events",
+      "agent_traces",
       "memories",
       "memory_candidates",
       "permissions",
