@@ -195,9 +195,22 @@ export type AikoWorkerSummaryDto = {
   description: string;
 };
 
+export type AikoExperienceSignalDto = {
+  id: string;
+  tone: "positive" | "negative" | "corrective" | "neutral";
+  satisfaction: "satisfied" | "unsatisfied" | "unclear";
+  aspect: "answer_style" | "tool_behavior" | "memory_behavior" | "latency" | "general";
+  confidence: number;
+  summary: string;
+  recommendation: string;
+  sourceText: string;
+  createdAt: string;
+};
+
 export type AikoAgentDebugSnapshotDto = {
   runs: AikoRunRecordDto[];
   statuses: AikoAgentStatusEventDto[];
+  experienceSignals: AikoExperienceSignalDto[];
   actionJournal: AikoActionJournalEntryDto[];
   traces: AikoTraceRecordDto[];
   workers: AikoWorkerSummaryDto[];

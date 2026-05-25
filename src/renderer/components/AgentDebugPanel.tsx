@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AikoAgentDebugSnapshotDto,
   AikoAgentStatusEventDto,
+  AikoExperienceSignalDto,
   AikoTraceRecordDto
 } from "../../shared/ipcTypes";
 
@@ -70,6 +71,7 @@ export function AgentDebugPanel() {
       <div className="agent-debug-grid">
         <SummaryCard title="运行" value={snapshot.runs.length} detail={formatLatestRun(snapshot)} />
         <SummaryCard title="状态" value={snapshot.statuses.length} detail={formatLatestStatus(snapshot)} />
+        <SummaryCard title="体验" value={snapshot.experienceSignals.length} detail={formatLatestExperienceSignal(snapshot)} />
         <SummaryCard title="Trace" value={snapshot.traces.length} detail={formatLatestTrace(latestTrace)} />
         <SummaryCard title="动作日志" value={snapshot.actionJournal.length} detail={formatLatestAction(snapshot)} />
         <SummaryCard title="Worker" value={snapshot.workers.length} detail={snapshot.workers.map((worker) => worker.name).join(", ")} />
@@ -89,6 +91,18 @@ export function AgentDebugPanel() {
             ))}
           </ol>
         )}
+      </section>
+
+      <section className="panel-section">
+        <h3>体验信号</h3>
+        {snapshot.experienceSignals.length === 0 && <p className="panel-muted">还没有隐式体验信号.</p>}
+        {snapshot.experienceSignals.slice(-6).reverse().map((signal) => (
+          <article key={signal.id} className="agent-debug-card">
+            <strong>{signal.satisfaction} / {signal.aspect}</strong>
+            <p>{formatExperienceSignal(signal)}</p>
+            <span>{new Date(signal.createdAt).toLocaleTimeString()}</span>
+          </article>
+        ))}
       </section>
 
       <section className="panel-section">
@@ -147,6 +161,13 @@ function formatLatestStatus(snapshot: AikoAgentDebugSnapshotDto) {
   return `${status.phase}: ${status.message}`;
 }
 
+// 格式化最新隐式体验信号, 用于观察 Aiko 是否捕捉到用户语气变化.
+function formatLatestExperienceSignal(snapshot: AikoAgentDebugSnapshotDto) {
+  const signal = snapshot.experienceSignals.at(-1);
+  if (!signal) return "";
+  return `${signal.satisfaction}: ${signal.recommendation}`;
+}
+
 // 格式化最新 trace 的完成阶段.
 function formatLatestTrace(trace: AikoTraceRecordDto | null) {
   if (!trace) return "";
@@ -157,6 +178,11 @@ function formatLatestTrace(trace: AikoTraceRecordDto | null) {
 function formatAgentStatus(status: AikoAgentStatusEventDto) {
   const detail = status.detail ? ` ${formatEventData(status.detail)}` : "";
   return `${status.message}${detail}`;
+}
+
+// 格式化隐式体验信号, 避免把用户原文完整铺满调试面板.
+function formatExperienceSignal(signal: AikoExperienceSignalDto) {
+  return `${signal.summary} ${signal.recommendation}`.trim();
 }
 
 // 格式化最新本地动作日志.
@@ -175,6 +201,7 @@ function formatEventData(data: Record<string, unknown>) {
 const emptySnapshot: AikoAgentDebugSnapshotDto = {
   runs: [],
   statuses: [],
+  experienceSignals: [],
   actionJournal: [],
   traces: [],
   workers: []

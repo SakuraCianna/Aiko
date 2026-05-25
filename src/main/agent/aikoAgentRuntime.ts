@@ -31,6 +31,8 @@ import type { SpeechUnderstandingProvider } from "../voice/voiceTypes";
 import { createAikoExecutor } from "./executor/aikoExecutor";
 import { createAikoCommitmentService } from "./commitments/commitmentService";
 import type { AikoCommitment, AikoCommitmentService } from "./commitments/commitmentService";
+import { createAikoExperiencePolicy } from "./experience/experiencePolicy";
+import type { AikoExperiencePolicy } from "./experience/experiencePolicy";
 import {
   createAikoActionApprovalWorkflow,
   createAikoAgentWorkflow,
@@ -160,6 +162,7 @@ export type AikoAgentRuntimeOptions = {
   hooks?: AikoRuntimeHooks;
   workerRegistry?: AikoWorkerRegistry;
   capabilityPolicy?: AikoCapabilityPolicy;
+  experiencePolicy?: AikoExperiencePolicy;
   currentKnowledgeProvider?: CurrentKnowledgeProvider;
   approvalMode?: AikoAgentWorkflowApprovalMode;
   approvalThreadIdFactory?: () => string;
@@ -178,6 +181,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const toolRegistry = createDefaultToolRegistry();
   const webRetriever = options.webRetriever ?? createDefaultWebRetriever(options.config);
   const currentKnowledgeProvider = options.currentKnowledgeProvider ?? createCurrentKnowledgeProvider();
+  const experiencePolicy = options.experiencePolicy ?? createAikoExperiencePolicy();
   const defaultAgentFactory = options.config ? createDefaultAgentFactory(options.config, toolRegistry) : undefined;
   const memoryCandidateExtractor =
     options.memoryCandidateExtractor ?? (options.config ? createDefaultMemoryCandidateExtractor(options.config) : undefined);
@@ -192,7 +196,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     speechUnderstandingProvider,
     toolRegistry,
     webRetriever,
-    currentKnowledgeProvider
+    currentKnowledgeProvider,
+    experiencePolicy
   });
   const planner = createAikoPlanner();
   const capabilityPolicy = options.capabilityPolicy ?? createDefaultCapabilityPolicy();
@@ -474,6 +479,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     listAgentDebugSnapshot: () => ({
       runs: runLifecycle.listRuns(),
       statuses: agentStatuses.map((status) => ({ ...status })),
+      experienceSignals: experiencePolicy.listSignals(),
       actionJournal: actionJournal.list(),
       traces: traceRecorder.list(),
       workers: workerRegistry.list()
@@ -665,6 +671,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   // 统一处理对话后的长期记忆和软承诺捕获.
   async function rememberLongTermContext(userTranscript: string, assistantText: string, runId?: string) {
     await runWorkerSafely("memory_write_worker", { userTranscript, assistantText });
+    await runWorkerSafely("experience_reflection_worker", { userTranscript, assistantText });
     await runWorkerSafely("commitment_worker", { userTranscript, assistantText });
     await hooks.emit({ name: "after_memory_write", runId, payload: { userTranscript } });
   }
@@ -793,6 +800,15 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         const exchange = readWorkerExchange(input);
         if (!exchange) return [];
         return commitmentService.captureFromExchange(exchange.userTranscript, exchange.assistantText);
+      }
+    });
+    registry.register({
+      name: "experience_reflection_worker",
+      description: "Infers short-term satisfaction and response-style guidance from user tone.",
+      run(input) {
+        const exchange = readWorkerExchange(input);
+        if (!exchange) return null;
+        return experiencePolicy.recordUserTone(exchange.userTranscript);
       }
     });
     registry.register({

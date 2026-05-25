@@ -31,5 +31,7 @@ describe("AgentDebugPanel", () => {
     expect(panel).toContain("approval_resume");
     expect(panel).toContain("snapshot.statuses");
     expect(panel).toContain("Agent 状态时间线");
+    expect(panel).toContain("snapshot.experienceSignals");
+    expect(panel).toContain("体验信号");
   });
 });

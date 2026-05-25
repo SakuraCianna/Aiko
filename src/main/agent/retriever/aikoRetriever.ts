@@ -4,6 +4,8 @@ import { createDefaultToolRegistry } from "../tools/toolRegistry";
 import type { AikoToolRegistry } from "../tools/toolRegistry";
 import { formatCurrentKnowledgeContext } from "../knowledge/currentKnowledgeProvider";
 import type { CurrentKnowledgeContext, CurrentKnowledgeProvider } from "../knowledge/currentKnowledgeProvider";
+import { formatExperiencePolicyContext } from "../experience/experiencePolicy";
+import type { AikoExperienceGuidance, AikoExperiencePolicy } from "../experience/experiencePolicy";
 import type { RecalledMemory } from "../../memory/memoryRecall";
 import type { SpeechUnderstandingProvider, SpeechUnderstandingResult } from "../../voice/voiceTypes";
 import { createAikoActiveMemorySelector } from "../memory/activeMemory";
@@ -20,6 +22,7 @@ export type AikoRetrieverOptions = {
   memoryAgent?: AikoMemoryAgent;
   activeMemorySelector?: AikoActiveMemorySelector;
   memoryRuntime?: AikoMemoryRuntime;
+  experiencePolicy?: AikoExperiencePolicy;
   researchAgent?: AikoResearchAgent;
   speechUnderstandingProvider?: SpeechUnderstandingProvider;
   toolRegistry?: AikoToolRegistry;
@@ -54,6 +57,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
     async retrieve(payload, requestOptions = {}) {
       const speechResults = await understandSpeech(payload, speechUnderstandingProvider);
       const userTranscript = buildUserTranscript(payload, speechResults);
+      const experienceGuidance = options.experiencePolicy?.createGuidance(userTranscript) ?? null;
       const [memories, research] = await Promise.all([
         activeMemorySelector.select(userTranscript),
         researchAgent.retrieve({ userText: payload.text, userTranscript }, requestOptions)
@@ -63,7 +67,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
       return {
         userText: payload.text,
         userTranscript,
-        userContent: buildUserContent(payload, speechResults, memories, webResearch, currentKnowledge),
+        userContent: buildUserContent(payload, speechResults, memories, webResearch, currentKnowledge, experienceGuidance),
         attachmentSummaries: payload.attachments.map((attachment) => ({
           id: attachment.id,
           kind: attachment.kind,
@@ -75,6 +79,7 @@ export function createAikoRetriever(options: AikoRetrieverOptions): AikoRetrieve
         speechResults,
         webResearch,
         currentKnowledge,
+        experienceGuidance,
         toolHints: toolRegistry.list().map((tool) => ({
           name: tool.name,
           capability: tool.capability,
@@ -133,7 +138,8 @@ export function buildUserContent(
   speechResults: SpeechUnderstandingResult[],
   recalledMemories: RecalledMemory[],
   webResearch?: WebResearchContext | null,
-  currentKnowledge?: CurrentKnowledgeContext | null
+  currentKnowledge?: CurrentKnowledgeContext | null,
+  experienceGuidance?: AikoExperienceGuidance | null
 ): AgentUserContent {
   const imageAttachments = payload.attachments.filter((attachment) => attachment.kind === "image");
   const audioAttachments = payload.attachments.filter((attachment) => attachment.kind === "audio");
@@ -148,7 +154,10 @@ export function buildUserContent(
   const memoryContext = formatMemoryContext(recalledMemories);
   const webContext = formatWebResearchContext(webResearch);
   const currentKnowledgeContext = formatCurrentKnowledgeContext(currentKnowledge);
-  const textContext = [text, memoryContext, speechContext, currentKnowledgeContext, webContext].filter(Boolean).join("\n\n");
+  const experienceContext = formatExperiencePolicyContext(experienceGuidance ?? { currentSignal: null, recentSignals: [], recommendations: [] });
+  const textContext = [text, memoryContext, speechContext, currentKnowledgeContext, webContext, experienceContext]
+    .filter(Boolean)
+    .join("\n\n");
 
   // 文本块携带 grounding 说明, 并和可选多模态内容一起发送.
   if (imageAttachments.length === 0) {

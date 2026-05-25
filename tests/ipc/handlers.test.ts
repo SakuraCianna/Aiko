@@ -95,6 +95,7 @@ describe("registerAikoHandlers pending action approvals", () => {
     await expect(callHandler("agent:debug-snapshot")).resolves.toMatchObject({
       runs: [],
       statuses: [],
+      experienceSignals: [],
       actionJournal: [],
       traces: [],
       workers: []
@@ -147,6 +148,7 @@ function createRuntime(options: {
       return {
         runs: [],
         statuses: [],
+        experienceSignals: [],
         actionJournal: [],
         traces: [],
         workers: []

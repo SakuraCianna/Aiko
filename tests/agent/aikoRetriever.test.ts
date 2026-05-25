@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createAikoExperiencePolicy } from "../../src/main/agent/experience/experiencePolicy";
 import { createAikoRetriever, formatMemoryContext } from "../../src/main/agent/retriever/aikoRetriever";
 import type { ChatPayload } from "../../src/shared/chatPayload";
 
@@ -118,6 +119,22 @@ describe("createAikoRetriever", () => {
 
     expect(context.memories).toEqual([{ id: "active_1", type: "preference", content: "active:focus plan" }]);
     expect(JSON.stringify(context.userContent)).toContain("active:focus plan");
+  });
+
+  it("injects inferred experience guidance as non-command context", async () => {
+    const retriever = createAikoRetriever({
+      experiencePolicy: createAikoExperiencePolicy()
+    });
+
+    const context = await retriever.retrieve(textPayload("你刚才太啰嗦了, 这次短一点"));
+
+    expect(context.experienceGuidance?.currentSignal).toMatchObject({
+      satisfaction: "unsatisfied",
+      aspect: "answer_style"
+    });
+    expect(JSON.stringify(context.userContent)).toContain("体验策略");
+    expect(JSON.stringify(context.userContent)).toContain("不是用户明确指令");
+    expect(JSON.stringify(context.userContent)).toContain("短");
   });
 
   it("adds Tavily web context as untrusted grounding when a web retriever is configured", async () => {

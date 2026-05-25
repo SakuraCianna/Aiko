@@ -398,8 +398,32 @@ describe("createAikoAgentRuntime", () => {
     ]);
     expect(snapshot.workers).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "memory_write_worker" }),
+      expect.objectContaining({ name: "experience_reflection_worker" }),
       expect.objectContaining({ name: "commitment_worker" })
     ]));
+  });
+
+  it("records implicit user tone feedback in the debug snapshot", async () => {
+    const runtime = createAikoAgentRuntime({
+      agent: {
+        async invoke() {
+          return {
+            messages: [{ role: "assistant", content: "我这次会短一点." }]
+          };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("你刚才太啰嗦了, 这次短一点"));
+    const snapshot = runtime.listAgentDebugSnapshot();
+
+    expect(snapshot.experienceSignals).toEqual([
+      expect.objectContaining({
+        satisfaction: "unsatisfied",
+        aspect: "answer_style",
+        recommendation: expect.stringContaining("短")
+      })
+    ]);
   });
 
   it("keeps model-proposed actions isolated across concurrent requests", async () => {
@@ -1257,7 +1281,11 @@ describe("createAikoAgentRuntime", () => {
 
     await runtime.respond(textPayload("I have an interview tomorrow."));
 
-    expect(workerRuns).toEqual(["memory_write_worker:object", "commitment_worker:object"]);
+    expect(workerRuns).toEqual([
+      "memory_write_worker:object",
+      "experience_reflection_worker:object",
+      "commitment_worker:object"
+    ]);
   });
 
   it("advertises internal worker boundaries without exposing extra personas", () => {
