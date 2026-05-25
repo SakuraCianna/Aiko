@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AikoApi, AikoProactiveMessage, ChatStreamDelta } from "../shared/ipcTypes";
+import type { AikoAgentStatusEventDto, AikoApi, AikoProactiveMessage, ChatStreamDelta } from "../shared/ipcTypes";
 
 const api: AikoApi = {
   // 测试主进程 IPC 是否可用.
@@ -22,6 +22,12 @@ const api: AikoApi = {
     const handler = (_event: Electron.IpcRendererEvent, delta: ChatStreamDelta) => listener(delta);
     ipcRenderer.on("chat:stream-delta", handler);
     return () => ipcRenderer.removeListener("chat:stream-delta", handler);
+  },
+  // 订阅 Agent 生命周期状态, 用于驱动桌宠动作和调试展示.
+  onAgentStatus: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: AikoAgentStatusEventDto) => listener(status);
+    ipcRenderer.on("agent:status", handler);
+    return () => ipcRenderer.removeListener("agent:status", handler);
   },
   // 订阅主进程主动推送的陪伴消息, 目前用于承诺心跳.
   onProactiveMessage: (listener) => {

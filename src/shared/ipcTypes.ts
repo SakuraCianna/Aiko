@@ -57,6 +57,29 @@ export type ChatStreamDelta = {
   text: string;
 };
 
+export type AikoAgentStatusPhase =
+  | "accepted"
+  | "running"
+  | "retrieving"
+  | "planning"
+  | "preparing_action"
+  | "waiting_approval"
+  | "model_generating"
+  | "memory_writing"
+  | "action_executing"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AikoAgentStatusEventDto = {
+  phase: AikoAgentStatusPhase;
+  message: string;
+  createdAt: string;
+  requestId?: string;
+  runId?: string;
+  detail?: Record<string, string | number | boolean | null>;
+};
+
 export type AikoProactiveMessage = {
   id: string;
   kind: "commitment";
@@ -188,6 +211,7 @@ export type AikoApi = {
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
+  onAgentStatus: (listener: (event: AikoAgentStatusEventDto) => void) => () => void;
   onProactiveMessage: (listener: (message: AikoProactiveMessage) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;
   cancelAction: (request: CancelActionRequest) => Promise<ExecuteActionResponse>;

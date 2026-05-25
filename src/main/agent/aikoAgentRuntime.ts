@@ -6,7 +6,12 @@ import { ChatOpenAICompletions } from "@langchain/openai";
 import { createAgent, tool } from "langchain";
 import { z } from "zod";
 import type { ChatPayload } from "../../shared/chatPayload";
-import type { AikoAgentDebugSnapshotDto, ChatResponse, PendingActionDto } from "../../shared/ipcTypes";
+import type {
+  AikoAgentDebugSnapshotDto,
+  AikoAgentStatusPhase,
+  ChatResponse,
+  PendingActionDto
+} from "../../shared/ipcTypes";
 import {
   describePendingAction,
   describeEmptyAssistantReply,
@@ -121,6 +126,7 @@ export type AikoAgentRuntime = {
 };
 
 export type AikoAgentRequestOptions = {
+  requestId?: string;
   signal?: AbortSignal;
 };
 
@@ -200,6 +206,26 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
   const approvalSessions = new Map<string, AikoAgentWorkflow | AikoActionApprovalWorkflow>();
   const approvalThreadRuns = new Map<string, string>();
+  // 发送 Agent 生命周期状态, renderer 会据此驱动 VRM 动作.
+  async function emitAgentStatus(
+    phase: AikoAgentStatusPhase,
+    message: string,
+    requestOptions: AikoAgentRequestOptions,
+    runId?: string,
+    detail?: Record<string, string | number | boolean | null>
+  ) {
+    await hooks.emit({
+      name: "agent_status",
+      runId,
+      payload: {
+        phase,
+        message,
+        requestId: requestOptions.requestId,
+        createdAt: new Date().toISOString(),
+        detail
+      }
+    });
+  }
   // 处理一次普通或流式聊天请求.
   async function respondInternal(
     payload: ChatPayload,
@@ -233,6 +259,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       approvalMode,
       checkpointer: options.workflowCheckpointer,
       async retrieve(input) {
+        await emitAgentStatus("retrieving", "Aiko is preparing context.", requestOptions, runId);
         const context = await retriever.retrieve(input, { signal });
         throwIfAborted(signal);
         trace.add("retriever.completed", {
@@ -243,6 +270,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         return context;
       },
       async plan(context) {
+        await emitAgentStatus("planning", "Aiko is planning the next step.", requestOptions, runId);
         const plan = await planner.plan({
           userText: context.userText,
           userTranscript: context.userTranscript,
@@ -256,6 +284,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         return plan;
       },
       async prepare(plan) {
+        await emitAgentStatus("preparing_action", "Aiko is preparing a safe action proposal.", requestOptions, runId, {
+          actionStepCount: plan.steps.filter((step) => step.kind === "action").length
+        });
         const proposal = await executor.prepare(plan);
         throwIfAborted(signal);
         return proposal;
@@ -325,6 +356,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       const prefersDesktopMarkdown = shouldPreferDesktopMarkdownResponse(context.userText, context.userTranscript);
       const modelWorkflow = createAikoModelResponseWorkflow<unknown, AikoModelResponseOutcome>({
         async generate() {
+          await emitAgentStatus("model_generating", "Aiko is asking the model.", requestOptions, runId);
           await hooks.emit({ name: "before_model_call", runId, payload: { userText: context.userText } });
           const result = await runAgent(agent, input, prefersDesktopMarkdown ? undefined : emitDelta, signal);
           await hooks.emit({ name: "after_model_call", runId, payload: { ok: true } });
@@ -350,6 +382,9 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
           return outcome;
         },
         async commitMemory(outcome) {
+          await emitAgentStatus("memory_writing", "Aiko is updating long term memory.", requestOptions, runId, {
+            mode: outcome.mode
+          });
           await rememberLongTermContext(context.userTranscript, outcome.memoryText, runId);
           trace.add("memory_commit.completed", {
             mode: outcome.mode
@@ -368,6 +403,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
         return { message: STREAM_CANCELLED_MESSAGE };
       }
       console.error("[aiko:agent] model call failed", formatAgentErrorForLog(error));
+      await emitAgentStatus("failed", "Aiko model call failed.", requestOptions, runId);
       const message = describeModelFallback();
       emitDelta(message);
       trace.add("agent.failed");
@@ -387,21 +423,30 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       sessionId: "chat",
       userText: payload.text || describeAttachmentOnlyPayload(payload)
     });
+    await emitAgentStatus("accepted", "Aiko accepted the request.", requestOptions, run.id);
 
     return runLifecycle.enqueue(async () => {
       runLifecycle.markRunning(run.id);
+      await emitAgentStatus("running", "Aiko started working on the request.", requestOptions, run.id);
       try {
         const response = await respondInternal(payload, onDelta, requestOptions, run.id);
         if (response.message === STREAM_CANCELLED_MESSAGE) {
           runLifecycle.markCancelled(run.id, response.message);
+          await emitAgentStatus("cancelled", "Aiko stopped the current response.", requestOptions, run.id);
         } else if (response.pendingAction) {
           runLifecycle.markWaitingApproval(run.id, response.pendingAction.title);
+          await emitAgentStatus("waiting_approval", "Aiko is waiting for user confirmation.", requestOptions, run.id, {
+            capability: response.pendingAction.capability,
+            risk: response.pendingAction.risk
+          });
         } else {
           runLifecycle.markCompleted(run.id, response.message.slice(0, 200));
+          await emitAgentStatus("completed", "Aiko completed the request.", requestOptions, run.id);
         }
         return response;
       } catch (error) {
         runLifecycle.markFailed(run.id, error);
+        await emitAgentStatus("failed", "Aiko request failed.", requestOptions, run.id);
         throw error;
       }
     });

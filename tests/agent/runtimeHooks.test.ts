@@ -20,4 +20,33 @@ describe("createAikoRuntimeHooks", () => {
 
     expect(events).toEqual(["before_model_call:run_1", "after-failure"]);
   });
+
+  it("supports agent status events for renderer motion feedback", async () => {
+    const hooks = createAikoRuntimeHooks();
+    const events: unknown[] = [];
+
+    hooks.on("agent_status", (event) => {
+      events.push(event.payload);
+    });
+
+    await hooks.emit({
+      name: "agent_status",
+      runId: "run_status",
+      payload: {
+        phase: "retrieving",
+        message: "Preparing context",
+        requestId: "request_1",
+        createdAt: "2026-05-25T10:00:00.000Z"
+      }
+    });
+
+    expect(events).toEqual([
+      {
+        phase: "retrieving",
+        message: "Preparing context",
+        requestId: "request_1",
+        createdAt: "2026-05-25T10:00:00.000Z"
+      }
+    ]);
+  });
 });

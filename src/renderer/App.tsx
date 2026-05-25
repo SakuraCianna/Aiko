@@ -13,6 +13,7 @@ import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { isCancellationCommand } from "./chat/cancelCommand";
 import { selectActionForCancellation } from "./chat/pendingAction";
+import { selectAgentStatusCue } from "./character/agentStatusMotion";
 import {
   selectActionResultCue,
   selectCancelMotion,
@@ -48,12 +49,14 @@ export function App() {
       setMessage((current) => (current === "正在思考..." ? delta.text : `${current}${delta.text}`));
       showControls();
     });
+    const unsubscribeAgentStatus = window.aiko.onAgentStatus(handleAgentStatus);
     const unsubscribeProactiveMessages = window.aiko.onProactiveMessage(handleProactiveMessage);
 
     return () => {
       const activeRequestId = activeStreamIdRef.current;
       if (activeRequestId) void window.aiko.cancelStream(activeRequestId);
       unsubscribeStreamDeltas();
+      unsubscribeAgentStatus();
       unsubscribeProactiveMessages();
       speechControllerRef.current?.cancel();
       speechControllerRef.current = null;
@@ -73,6 +76,16 @@ export function App() {
     if (activeStreamIdRef.current) return;
     setMessage(proactive.message);
     speakAiko(proactive.message, "idle", "speaking", "notice");
+    showControls();
+  }
+
+  // 根据主进程发来的 Agent 阶段事件更新角色动作, 让 VRM 不只依赖前端猜测.
+  function handleAgentStatus(status: Parameters<typeof selectAgentStatusCue>[0]) {
+    if (status.requestId && activeStreamIdRef.current && status.requestId !== activeStreamIdRef.current) return;
+    const cue = selectAgentStatusCue(status);
+    if (!cue) return;
+    setCharacterBehaviorNow(cue.behavior);
+    requestCharacterMotion(cue.motion);
     showControls();
   }
 

@@ -124,7 +124,7 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       const response = await deps.agentRuntime.respondStream(payload, (text) => {
         if (abortController.signal.aborted) return;
         sendStreamDelta(event.sender, requestId, text);
-      }, { signal: abortController.signal });
+      }, { requestId, signal: abortController.signal });
       return respondWithLocalAction(response.message, response.pendingAction);
     } catch {
       return { message: "我这边暂时没有收到回复,但本地功能还在." };

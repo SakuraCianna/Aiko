@@ -6,6 +6,7 @@ import { createAikoCommitmentHeartbeat } from "./agent/commitments/commitmentHea
 import { createAikoCommitmentService } from "./agent/commitments/commitmentService";
 import { createCommitmentProactiveMessage } from "./agent/commitments/proactiveCommitment";
 import { createAikoActionJournal } from "./agent/runtime/actionJournal";
+import { attachAikoAgentStatusForwarder } from "./agent/runtime/agentStatus";
 import { createAikoRuntimeHooks } from "./agent/runtime/runtimeHooks";
 import { createSqliteCheckpointSaver } from "./agent/graph/sqliteCheckpointSaver";
 import { loadConfig } from "./config/env";
@@ -29,6 +30,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = resolvePreloadPath(__dirname);
 let database: AikoDatabase | null = null;
 let stopCommitmentHeartbeat: (() => void) | null = null;
+let stopAgentStatusForwarder: (() => void) | null = null;
 
 configureDevelopmentSessionData();
 
@@ -45,6 +47,7 @@ void app.whenReady().then(() => {
   const workflowCheckpointer = createSqliteCheckpointSaver(database.db);
   const commitmentService = createAikoCommitmentService();
   const hooks = createAikoRuntimeHooks();
+  stopAgentStatusForwarder = attachAikoAgentStatusForwarder([petWindow, panelWindow], hooks);
   const agentRuntime = createAikoAgentRuntime({
     config,
     memoryRuntime: memoryRepository,
@@ -83,6 +86,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   stopCommitmentHeartbeat?.();
   stopCommitmentHeartbeat = null;
+  stopAgentStatusForwarder?.();
+  stopAgentStatusForwarder = null;
   database?.close();
   database = null;
 });

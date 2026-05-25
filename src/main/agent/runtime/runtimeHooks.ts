@@ -1,4 +1,5 @@
 export type AikoRuntimeHookName =
+  | "agent_status"
   | "before_model_call"
   | "after_model_call"
   | "before_tool_call"
