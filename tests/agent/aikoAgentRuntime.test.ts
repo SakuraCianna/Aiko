@@ -386,6 +386,16 @@ describe("createAikoAgentRuntime", () => {
       "agent.completed",
       "request.completed"
     ]);
+    expect(snapshot.statuses.map((status) => status.phase)).toEqual([
+      "accepted",
+      "running",
+      "retrieving",
+      "planning",
+      "preparing_action",
+      "model_generating",
+      "memory_writing",
+      "completed"
+    ]);
     expect(snapshot.workers).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "memory_write_worker" }),
       expect.objectContaining({ name: "commitment_worker" })

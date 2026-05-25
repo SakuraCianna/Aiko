@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AikoAgentDebugSnapshotDto, AikoTraceRecordDto } from "../../shared/ipcTypes";
+import type {
+  AikoAgentDebugSnapshotDto,
+  AikoAgentStatusEventDto,
+  AikoTraceRecordDto
+} from "../../shared/ipcTypes";
 
 const IMPORTANT_STEPS = [
   "retriever.completed",
@@ -65,10 +69,27 @@ export function AgentDebugPanel() {
 
       <div className="agent-debug-grid">
         <SummaryCard title="运行" value={snapshot.runs.length} detail={formatLatestRun(snapshot)} />
+        <SummaryCard title="状态" value={snapshot.statuses.length} detail={formatLatestStatus(snapshot)} />
         <SummaryCard title="Trace" value={snapshot.traces.length} detail={formatLatestTrace(latestTrace)} />
         <SummaryCard title="动作日志" value={snapshot.actionJournal.length} detail={formatLatestAction(snapshot)} />
         <SummaryCard title="Worker" value={snapshot.workers.length} detail={snapshot.workers.map((worker) => worker.name).join(", ")} />
       </div>
+
+      <section className="panel-section">
+        <h3>Agent 状态时间线</h3>
+        {snapshot.statuses.length === 0 && <p className="panel-muted">还没有状态事件.</p>}
+        {snapshot.statuses.length > 0 && (
+          <ol className="agent-step-list">
+            {snapshot.statuses.slice(-10).reverse().map((status) => (
+              <li key={`${status.createdAt}-${status.phase}-${status.runId ?? ""}`}>
+                <span>{status.phase}</span>
+                <small>{new Date(status.createdAt).toLocaleTimeString()}</small>
+                <code>{formatAgentStatus(status)}</code>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section className="panel-section">
         <h3>最近 Trace</h3>
@@ -119,10 +140,23 @@ function formatLatestRun(snapshot: AikoAgentDebugSnapshotDto) {
   return `${run.status}: ${run.userText}`;
 }
 
+// 格式化最新 Agent 状态, 用于概览卡片.
+function formatLatestStatus(snapshot: AikoAgentDebugSnapshotDto) {
+  const status = snapshot.statuses.at(-1);
+  if (!status) return "";
+  return `${status.phase}: ${status.message}`;
+}
+
 // 格式化最新 trace 的完成阶段.
 function formatLatestTrace(trace: AikoTraceRecordDto | null) {
   if (!trace) return "";
   return trace.events.at(-1)?.name ?? "";
+}
+
+// 格式化单条 Agent 状态事件, 展示 message 和少量 detail.
+function formatAgentStatus(status: AikoAgentStatusEventDto) {
+  const detail = status.detail ? ` ${formatEventData(status.detail)}` : "";
+  return `${status.message}${detail}`;
 }
 
 // 格式化最新本地动作日志.
@@ -140,6 +174,7 @@ function formatEventData(data: Record<string, unknown>) {
 
 const emptySnapshot: AikoAgentDebugSnapshotDto = {
   runs: [],
+  statuses: [],
   actionJournal: [],
   traces: [],
   workers: []

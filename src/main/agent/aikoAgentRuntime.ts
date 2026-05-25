@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ChatPayload } from "../../shared/chatPayload";
 import type {
   AikoAgentDebugSnapshotDto,
+  AikoAgentStatusEventDto,
   AikoAgentStatusPhase,
   ChatResponse,
   PendingActionDto
@@ -95,6 +96,7 @@ type AikoModelPostprocessInput = {
 export const AIKO_CHAT_TEMPERATURE = 0.3;
 const LONG_RESPONSE_MARKDOWN_THRESHOLD = 1200;
 const DESKTOP_MARKDOWN_TARGET = "Desktop/Aiko";
+const MAX_AGENT_STATUS_EVENTS = 120;
 const STREAM_CANCELLED_MESSAGE = "已中止. 我先停下.";
 
 export type AikoAgentInvoker = {
@@ -206,6 +208,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   const approvalThreadIdFactory = options.approvalThreadIdFactory ?? (() => `aiko-approval-${randomUUID()}`);
   const approvalSessions = new Map<string, AikoAgentWorkflow | AikoActionApprovalWorkflow>();
   const approvalThreadRuns = new Map<string, string>();
+  const agentStatuses: AikoAgentStatusEventDto[] = [];
   // 发送 Agent 生命周期状态, renderer 会据此驱动 VRM 动作.
   async function emitAgentStatus(
     phase: AikoAgentStatusPhase,
@@ -214,16 +217,21 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     runId?: string,
     detail?: Record<string, string | number | boolean | null>
   ) {
+    const status: AikoAgentStatusEventDto = {
+      phase,
+      message,
+      requestId: requestOptions.requestId,
+      runId,
+      createdAt: new Date().toISOString(),
+      detail
+    };
+    agentStatuses.push(status);
+    trimAgentStatuses(agentStatuses);
+
     await hooks.emit({
       name: "agent_status",
       runId,
-      payload: {
-        phase,
-        message,
-        requestId: requestOptions.requestId,
-        createdAt: new Date().toISOString(),
-        detail
-      }
+      payload: status
     });
   }
   // 处理一次普通或流式聊天请求.
@@ -465,11 +473,19 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     listWorkers: () => workerRegistry.list(),
     listAgentDebugSnapshot: () => ({
       runs: runLifecycle.listRuns(),
+      statuses: agentStatuses.map((status) => ({ ...status })),
       actionJournal: actionJournal.list(),
       traces: traceRecorder.list(),
       workers: workerRegistry.list()
     })
   };
+
+  // 保留最近的 Agent 状态事件, 避免调试快照无限增长.
+  function trimAgentStatuses(statuses: AikoAgentStatusEventDto[]) {
+    while (statuses.length > MAX_AGENT_STATUS_EVENTS) {
+      statuses.shift();
+    }
+  }
 
   // 将当前短期上下文注入模型输入, 不影响长期记忆.
   function withConversationContext(userContent: AgentUserContent): AgentUserContent {

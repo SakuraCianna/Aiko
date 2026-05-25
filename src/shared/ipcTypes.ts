@@ -197,6 +197,7 @@ export type AikoWorkerSummaryDto = {
 
 export type AikoAgentDebugSnapshotDto = {
   runs: AikoRunRecordDto[];
+  statuses: AikoAgentStatusEventDto[];
   actionJournal: AikoActionJournalEntryDto[];
   traces: AikoTraceRecordDto[];
   workers: AikoWorkerSummaryDto[];

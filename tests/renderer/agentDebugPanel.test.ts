@@ -17,6 +17,7 @@ describe("AgentDebugPanel", () => {
     expect(preload).toContain("agent:debug-snapshot");
     expect(sharedTypes).toContain("AikoAgentDebugSnapshotDto");
     expect(styles).toContain(".agent-debug-grid");
+    expect(sharedTypes).toContain("AikoAgentStatusEventDto");
   });
 
   it("keeps async refreshes guarded after unmount and stale requests", () => {
@@ -28,5 +29,7 @@ describe("AgentDebugPanel", () => {
     expect(panel).toContain("refreshSeqRef.current === refreshId");
     expect(panel).toContain("model_generate.completed");
     expect(panel).toContain("approval_resume");
+    expect(panel).toContain("snapshot.statuses");
+    expect(panel).toContain("Agent 状态时间线");
   });
 });
