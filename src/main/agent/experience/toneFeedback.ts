@@ -13,12 +13,11 @@ export type AikoUserToneSignal = {
 
 const correctivePatterns = [
   /不是这个意思|不是这个|不对|错了|搞错|理解错|你没懂|没懂我意思|应该是/i,
-  /又.*(?:错|没|不|还)|怎么.*(?:又|还|没|不)|一直.*(?:错|没|不)/i,
-  /太啰嗦|太长|短一点|简短一点|直接一点/i
+  /又.*(?:错|没|不|还)|怎么.*(?:又|还|没|不)|一直.*(?:错|没|不)/i
 ];
 
 const negativePatterns = [
-  /太啰嗦|太长|废话|别说这么多|短一点|简短一点|直接一点/i,
+  /太啰嗦|太长|废话|别说这么多/i,
   /没反应|打不开|没打开|失败|失效|卡住|卡顿|闪烁|不显示|看不到/i,
   /不满意|不好用|不够聪明|不够自然|没有特点|很奇怪|别自顾自|自问自答/i,
   /别说了|不要说了|停止|中止|终止|停下/i
@@ -35,7 +34,7 @@ export function analyzeUserTone(text: string): AikoUserToneSignal {
   if (!normalized) return neutralSignal();
 
   const aspect = inferAspect(normalized);
-  if (matchesAny(normalized, correctivePatterns)) {
+  if (matchesAny(normalized, correctivePatterns) || isAnswerStyleFeedback(normalized)) {
     return {
       tone: "corrective",
       satisfaction: "unsatisfied",
@@ -74,6 +73,13 @@ export function analyzeUserTone(text: string): AikoUserToneSignal {
 // 判断输入是否命中任一语气模式.
 function matchesAny(text: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(text));
+}
+
+// 区分"当前任务想短一点"和"用户在纠正上次太啰嗦".
+function isAnswerStyleFeedback(text: string) {
+  if (/太啰嗦|太长|废话|别说这么多/.test(text)) return true;
+  if (!/短一点|简短一点|直接一点/.test(text)) return false;
+  return /刚才|刚刚|上次|下次|以后|你(?:这个|的)?(?:回答|回复|说)/.test(text);
 }
 
 // 根据关键词推断用户不满更可能落在哪个体验面.

@@ -35,4 +35,15 @@ describe("analyzeUserTone", () => {
       confidence: 0
     });
   });
+
+  it("does not treat ordinary style requirements as dissatisfaction", () => {
+    const signal = analyzeUserTone("帮我写一份短一点的学习计划");
+
+    expect(signal).toMatchObject({
+      tone: "neutral",
+      satisfaction: "unclear",
+      aspect: "general",
+      confidence: 0
+    });
+  });
 });
