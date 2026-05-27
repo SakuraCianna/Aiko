@@ -65,3 +65,35 @@ export type SpeechUnderstandingResult = {
 export type SpeechUnderstandingProvider = {
   understand: (input: SpeechUnderstandingInput) => Promise<SpeechUnderstandingResult[]>;
 };
+
+export type SpeechStreamStartInput = {
+  sessionId: string;
+  sampleRate: number;
+  frameMs: number;
+};
+
+export type SpeechStreamChunkInput = {
+  sessionId: string;
+  sequence: number;
+  sampleRate: number;
+  pcm: Buffer;
+  isFinal?: boolean;
+};
+
+export type SpeechStreamFinishInput = {
+  sessionId: string;
+};
+
+export type SpeechStreamFinishResult = {
+  transcript: string;
+  confidence?: number;
+  language?: string;
+  error?: string;
+};
+
+export type SpeechStreamingProvider = {
+  start: (input: SpeechStreamStartInput) => Promise<void>;
+  pushChunk: (input: SpeechStreamChunkInput) => Promise<void>;
+  finish: (input: SpeechStreamFinishInput) => Promise<SpeechStreamFinishResult>;
+  cancel: (input: SpeechStreamFinishInput) => Promise<void>;
+};

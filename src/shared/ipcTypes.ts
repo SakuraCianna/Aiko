@@ -57,6 +57,61 @@ export type ChatStreamDelta = {
   text: string;
 };
 
+export type SpeechStreamStartRequestDto = {
+  sessionId: string;
+  sampleRate: number;
+  frameMs: number;
+};
+
+export type SpeechStreamStartResponseDto =
+  | {
+      ok: true;
+      sessionId: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+export type SpeechStreamChunkRequestDto = {
+  sessionId: string;
+  sequence: number;
+  sampleRate: number;
+  pcmBase64: string;
+  isFinal?: boolean;
+};
+
+export type SpeechStreamChunkResponseDto = {
+  ok: boolean;
+  message?: string;
+};
+
+export type SpeechStreamFinishRequestDto = {
+  sessionId: string;
+};
+
+export type SpeechStreamFinishResponseDto =
+  | {
+      ok: true;
+      transcript: string;
+      confidence?: number;
+      language?: string;
+    }
+  | {
+      ok: false;
+      message: string;
+      transcript?: string;
+    };
+
+export type SpeechTranscriptDelta = {
+  sessionId: string;
+  sequence: number;
+  text: string;
+  isFinal: boolean;
+  confidence?: number;
+  language?: string;
+};
+
 export type SynthesizeSpeechRequestDto = {
   text: string;
   emotion?: "neutral" | "happy" | "serious" | "comfort" | "notice";
@@ -270,7 +325,12 @@ export type AikoApi = {
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   synthesizeSpeech: (request: SynthesizeSpeechRequestDto) => Promise<SynthesizeSpeechResponseDto>;
   getVoiceStatus: () => Promise<VoiceStatusSnapshotDto>;
+  startSpeechStream: (request: SpeechStreamStartRequestDto) => Promise<SpeechStreamStartResponseDto>;
+  pushSpeechStreamChunk: (request: SpeechStreamChunkRequestDto) => Promise<SpeechStreamChunkResponseDto>;
+  finishSpeechStream: (request: SpeechStreamFinishRequestDto) => Promise<SpeechStreamFinishResponseDto>;
+  cancelSpeechStream: (request: SpeechStreamFinishRequestDto) => Promise<SpeechStreamChunkResponseDto>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
+  onSpeechTranscriptDelta: (listener: (delta: SpeechTranscriptDelta) => void) => () => void;
   onAgentStatus: (listener: (event: AikoAgentStatusEventDto) => void) => () => void;
   onProactiveMessage: (listener: (message: AikoProactiveMessage) => void) => () => void;
   executeAction: (request: ExecuteActionRequest) => Promise<ExecuteActionResponse>;

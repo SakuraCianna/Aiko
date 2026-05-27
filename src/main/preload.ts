@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AikoAgentStatusEventDto, AikoApi, AikoProactiveMessage, ChatStreamDelta } from "../shared/ipcTypes";
+import type {
+  AikoAgentStatusEventDto,
+  AikoApi,
+  AikoProactiveMessage,
+  ChatStreamDelta,
+  SpeechTranscriptDelta
+} from "../shared/ipcTypes";
 
 const api: AikoApi = {
   // 测试主进程 IPC 是否可用.
@@ -20,12 +26,26 @@ const api: AikoApi = {
   synthesizeSpeech: (request) => ipcRenderer.invoke("voice:synthesize", request),
   // 读取本地 ASR/TTS provider 健康状态.
   getVoiceStatus: () => ipcRenderer.invoke("voice:status"),
+  // 开启流式 ASR 会话.
+  startSpeechStream: (request) => ipcRenderer.invoke("voice:stream-start", request),
+  // 推送一段 PCM16LE 语音分片.
+  pushSpeechStreamChunk: (request) => ipcRenderer.invoke("voice:stream-chunk", request),
+  // 结束流式 ASR 会话并读取最终转写.
+  finishSpeechStream: (request) => ipcRenderer.invoke("voice:stream-finish", request),
+  // 取消流式 ASR 会话并释放主进程缓存.
+  cancelSpeechStream: (request) => ipcRenderer.invoke("voice:stream-cancel", request),
   // 订阅聊天流式增量事件.
   onChatStreamDelta: (listener) => {
     // 把主进程流式消息转成渲染层回调.
     const handler = (_event: Electron.IpcRendererEvent, delta: ChatStreamDelta) => listener(delta);
     ipcRenderer.on("chat:stream-delta", handler);
     return () => ipcRenderer.removeListener("chat:stream-delta", handler);
+  },
+  // 订阅语音转写增量, 当前 buffered provider 只会发送最终结果.
+  onSpeechTranscriptDelta: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, delta: SpeechTranscriptDelta) => listener(delta);
+    ipcRenderer.on("voice:transcript-delta", handler);
+    return () => ipcRenderer.removeListener("voice:transcript-delta", handler);
   },
   // 订阅 Agent 生命周期状态, 用于驱动桌宠动作和调试展示.
   onAgentStatus: (listener) => {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AikoAgentRuntime } from "../../src/main/agent/aikoAgentRuntime";
 import { registerAikoHandlers } from "../../src/main/ipc/handlers";
-import type { ChatResponse, PendingActionDto } from "../../src/shared/ipcTypes";
+import type { ChatResponse, PendingActionDto, SpeechTranscriptDelta } from "../../src/shared/ipcTypes";
 
 const electronMock = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -175,6 +175,94 @@ describe("registerAikoHandlers pending action approvals", () => {
       tts: { provider: "tencent-cloud", status: "disabled" }
     });
   });
+
+  it("streams microphone PCM chunks through IPC and emits the final transcript", async () => {
+    const sender = fakeSender();
+    const pushedSequences: number[] = [];
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications(),
+      speechStreamingProvider: {
+        async start(input) {
+          expect(input).toEqual({ sessionId: "speech-1", sampleRate: 16000, frameMs: 200 });
+        },
+        async pushChunk(input) {
+          pushedSequences.push(input.sequence);
+          expect(input.sessionId).toBe("speech-1");
+          expect(input.sampleRate).toBe(16000);
+          expect(input.pcm.byteLength).toBe(2);
+        },
+        async finish(input) {
+          expect(input).toEqual({ sessionId: "speech-1" });
+          return { transcript: "你好 Aiko", confidence: 0.9, language: "zh" };
+        },
+        async cancel() {
+          return;
+        }
+      }
+    });
+
+    await expect(callHandlerWithEvent("voice:stream-start", { sender }, {
+      sessionId: "speech-1",
+      sampleRate: 16000,
+      frameMs: 200
+    })).resolves.toEqual({ ok: true, sessionId: "speech-1" });
+    await expect(callHandlerWithEvent("voice:stream-chunk", { sender }, {
+      sessionId: "speech-1",
+      sequence: 0,
+      sampleRate: 16000,
+      pcmBase64: Buffer.from([0x00, 0x00]).toString("base64"),
+      isFinal: false
+    })).resolves.toEqual({ ok: true });
+    await expect(callHandlerWithEvent("voice:stream-finish", { sender }, {
+      sessionId: "speech-1"
+    })).resolves.toEqual({ ok: true, transcript: "你好 Aiko", confidence: 0.9, language: "zh" });
+
+    expect(pushedSequences).toEqual([0]);
+    expect(sender.send).toHaveBeenCalledWith("voice:transcript-delta", {
+      sessionId: "speech-1",
+      sequence: 0,
+      text: "你好 Aiko",
+      isFinal: true,
+      confidence: 0.9,
+      language: "zh"
+    } satisfies SpeechTranscriptDelta);
+  });
+
+  it("reports streaming ASR as unavailable when no provider is configured", async () => {
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications()
+    });
+
+    await expect(callHandler("voice:stream-start", {
+      sessionId: "speech-1",
+      sampleRate: 16000,
+      frameMs: 200
+    })).resolves.toEqual({ ok: false, message: "ASR streaming provider is not configured" });
+  });
 });
 
 function createRuntime(options: {
@@ -273,8 +361,21 @@ function fakeWindow() {
   } as never;
 }
 
+function fakeSender() {
+  return {
+    isDestroyed: vi.fn(() => false),
+    send: vi.fn()
+  };
+}
+
 async function callHandler<T>(channel: string, ...args: unknown[]): Promise<T> {
   const handler = electronMock.handlers.get(channel);
   if (!handler) throw new Error(`Missing IPC handler: ${channel}`);
   return await handler({}, ...args) as T;
+}
+
+async function callHandlerWithEvent<T>(channel: string, event: unknown, ...args: unknown[]): Promise<T> {
+  const handler = electronMock.handlers.get(channel);
+  if (!handler) throw new Error(`Missing IPC handler: ${channel}`);
+  return await handler(event, ...args) as T;
 }

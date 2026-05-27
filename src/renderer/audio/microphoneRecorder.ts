@@ -4,33 +4,79 @@ export type WavAudioRecorder = {
   stop: () => Promise<Blob>;
 };
 
-// 创建浏览器内 WAV 录音器, 让腾讯云一句话识别可以直接读取麦克风音频.
-export async function createWavAudioRecorder(stream: MediaStream): Promise<WavAudioRecorder> {
+export type WavAudioRecorderOptions = {
+  onPcmChunk?: (chunk: Float32Array) => void;
+};
+
+const RECORDER_WORKLET_NAME = "aiko-wav-recorder";
+const RECORDER_SAMPLE_RATE = 16000;
+
+const RECORDER_WORKLET_SOURCE = `
+class AikoWavRecorderProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs) {
+    const input = inputs[0]?.[0];
+    const output = outputs[0]?.[0];
+    if (output) output.fill(0);
+    if (input && input.length > 0) {
+      const samples = new Float32Array(input);
+      this.port.postMessage({ samples }, [samples.buffer]);
+    }
+    return true;
+  }
+}
+
+registerProcessor("${RECORDER_WORKLET_NAME}", AikoWavRecorderProcessor);
+`;
+
+// 创建浏览器内 WAV 录音器, 使用 AudioWorklet 采集 PCM 以降低录音延迟和弃用警告.
+export async function createWavAudioRecorder(stream: MediaStream, options: WavAudioRecorderOptions = {}): Promise<WavAudioRecorder> {
   const AudioContextCtor = readAudioContextConstructor();
-  const audioContext = new AudioContextCtor({ sampleRate: 16000 });
+  const AudioWorkletNodeCtor = readAudioWorkletNodeConstructor();
+  const audioContext = new AudioContextCtor({ sampleRate: RECORDER_SAMPLE_RATE });
   const source = audioContext.createMediaStreamSource(stream);
-  const processor = audioContext.createScriptProcessor(4096, 1, 1);
   const silentGain = audioContext.createGain();
   const chunks: Float32Array[] = [];
+  let recorderNode: AudioWorkletNode | null = null;
   let stopped = false;
 
-  silentGain.gain.value = 0;
-  processor.onaudioprocess = (event) => {
-    if (stopped) return;
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-  };
-  source.connect(processor);
-  processor.connect(silentGain);
-  silentGain.connect(audioContext.destination);
+  try {
+    await registerRecorderWorklet(audioContext);
+    recorderNode = new AudioWorkletNodeCtor(audioContext, RECORDER_WORKLET_NAME, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1]
+    });
+
+    silentGain.gain.value = 0;
+    recorderNode.port.onmessage = (event: MessageEvent<{ samples?: Float32Array }>) => {
+      if (stopped) return;
+      const samples = event.data.samples;
+      if (samples instanceof Float32Array && samples.length > 0) {
+        const chunk = new Float32Array(samples);
+        chunks.push(chunk);
+        options.onPcmChunk?.(chunk);
+      }
+    };
+
+    source.connect(recorderNode);
+    recorderNode.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+  } catch (error) {
+    disconnectAudioNodeQuietly(source);
+    disconnectAudioNodeQuietly(silentGain);
+    await closeAudioContextQuietly(audioContext);
+    throw error;
+  }
 
   return {
     // 停止录音并把 PCM 样本封装为 WAV Blob.
     async stop() {
       if (stopped) return createPcm16WavBlob(chunks, audioContext.sampleRate);
       stopped = true;
-      source.disconnect();
-      processor.disconnect();
-      silentGain.disconnect();
+      disconnectAudioNodeQuietly(source);
+      if (recorderNode) disconnectAudioNodeQuietly(recorderNode);
+      recorderNode?.port.close();
+      disconnectAudioNodeQuietly(silentGain);
       await audioContext.close();
       return createPcm16WavBlob(chunks, audioContext.sampleRate);
     }
@@ -85,6 +131,19 @@ export function createPcm16WavBlob(chunks: Float32Array[], sampleRate: number): 
   return new Blob([buffer], { type: "audio/wav" });
 }
 
+// 把录音 worklet 以内联模块注册到当前 AudioContext.
+async function registerRecorderWorklet(audioContext: AudioContext) {
+  if (!audioContext.audioWorklet) throw new Error("AudioWorklet is not available");
+  if (!URL.createObjectURL) throw new Error("URL.createObjectURL is not available");
+
+  const moduleUrl = URL.createObjectURL(new Blob([RECORDER_WORKLET_SOURCE], { type: "text/javascript" }));
+  try {
+    await audioContext.audioWorklet.addModule(moduleUrl);
+  } finally {
+    URL.revokeObjectURL(moduleUrl);
+  }
+}
+
 // 读取浏览器 AudioContext 构造器, 兼容旧 WebKit 环境.
 function readAudioContextConstructor(): typeof AudioContext {
   const contextWindow = globalThis as typeof globalThis & {
@@ -94,6 +153,34 @@ function readAudioContextConstructor(): typeof AudioContext {
   const AudioContextCtor = contextWindow.AudioContext || contextWindow.webkitAudioContext;
   if (!AudioContextCtor) throw new Error("AudioContext is not available");
   return AudioContextCtor;
+}
+
+// 读取 AudioWorkletNode 构造器, 当前录音链路要求现代 Chromium 支持.
+function readAudioWorkletNodeConstructor(): typeof AudioWorkletNode {
+  const contextWindow = globalThis as typeof globalThis & {
+    AudioWorkletNode?: typeof AudioWorkletNode;
+  };
+  const AudioWorkletNodeCtor = contextWindow.AudioWorkletNode;
+  if (!AudioWorkletNodeCtor) throw new Error("AudioWorkletNode is not available");
+  return AudioWorkletNodeCtor;
+}
+
+// 安静关闭 AudioContext, 避免初始化失败时泄露音频资源.
+async function closeAudioContextQuietly(audioContext: AudioContext) {
+  try {
+    await audioContext.close();
+  } catch {
+    return;
+  }
+}
+
+// 安静断开音频节点, 处理初始化失败时尚未连接的节点.
+function disconnectAudioNodeQuietly(node: AudioNode) {
+  try {
+    node.disconnect();
+  } catch {
+    return;
+  }
 }
 
 // 把 ASCII 标记写入 WAV header.

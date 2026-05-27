@@ -25,6 +25,7 @@ import {
 import type { AppStateRepository } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
+import { createBufferedSpeechStreamingProvider } from "./voice/bufferedSpeechStreamingProvider";
 import { createTencentCloudSpeechUnderstandingProvider } from "./voice/tencentCloudAsrProvider";
 import { createTencentCloudSpeechSynthesisProvider } from "./voice/tencentCloudTtsProvider";
 import { createVoiceHealthService } from "./voice/voiceHealth";
@@ -57,6 +58,9 @@ void app.whenReady().then(() => {
   const hooks = createAikoRuntimeHooks();
   const speechUnderstandingProvider = config.voice.asr.enabled
     ? createTencentCloudSpeechUnderstandingProvider(config.voice.asr)
+    : undefined;
+  const speechStreamingProvider = speechUnderstandingProvider
+    ? createBufferedSpeechStreamingProvider(speechUnderstandingProvider)
     : undefined;
   const speechSynthesisProvider = config.voice.tts.enabled
     ? createTencentCloudSpeechSynthesisProvider(config.voice.tts)
@@ -93,6 +97,7 @@ void app.whenReady().then(() => {
     reminderRepository,
     applicationPreferenceRepository,
     speechSynthesisProvider,
+    speechStreamingProvider,
     voiceHealthService
   });
   stopCommitmentHeartbeat = startCommitmentHeartbeat([petWindow, panelWindow], commitmentService);

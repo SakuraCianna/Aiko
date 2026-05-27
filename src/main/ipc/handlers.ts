@@ -13,7 +13,7 @@ import { openUrl } from "../capabilities/openUrl";
 import { createPowerShellCommandRunner } from "../capabilities/shellCommand";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 import type { VoiceHealthService } from "../voice/voiceHealth";
-import type { SpeechSynthesisProvider } from "../voice/voiceTypes";
+import type { SpeechStreamingProvider, SpeechSynthesisProvider } from "../voice/voiceTypes";
 import type {
   ApplicationPreferenceRepository,
   MemoryRepository,
@@ -28,6 +28,12 @@ import type {
   PanelName,
   PendingActionDto,
   ReminderStatusDto,
+  SpeechStreamChunkRequestDto,
+  SpeechStreamChunkResponseDto,
+  SpeechStreamFinishRequestDto,
+  SpeechStreamFinishResponseDto,
+  SpeechStreamStartRequestDto,
+  SpeechStreamStartResponseDto,
   SynthesizeSpeechRequestDto,
   SynthesizeSpeechResponseDto
 } from "../../shared/ipcTypes";
@@ -44,6 +50,7 @@ export type AikoHandlerDeps = {
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   applicationProvider?: () => ApplicationConfig[];
   speechSynthesisProvider?: SpeechSynthesisProvider;
+  speechStreamingProvider?: SpeechStreamingProvider;
   voiceHealthService?: VoiceHealthService;
 };
 
@@ -54,6 +61,8 @@ type PendingActionEntry = {
 
 const PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
 const MAX_BATCH_ACTIONS = 5;
+const MAX_SPEECH_STREAM_CHUNK_BASE64_LENGTH = 180 * 1024;
+const ALLOWED_SPEECH_STREAM_SAMPLE_RATES = new Set([16000]);
 
 // 注册主进程 IPC 处理器, 连接窗口, Agent, 记忆和本地动作执行.
 export function registerAikoHandlers(deps: AikoHandlerDeps) {
@@ -193,6 +202,75 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       };
     }
     return deps.voiceHealthService.snapshot();
+  });
+
+  ipcMain.handle("voice:stream-start", async (_event, input: unknown): Promise<SpeechStreamStartResponseDto> => {
+    const request = parseSpeechStreamStartRequest(input);
+    if (!request) return { ok: false, message: "Invalid speech stream start request" };
+    if (!deps.speechStreamingProvider) return { ok: false, message: "ASR streaming provider is not configured" };
+
+    try {
+      await deps.speechStreamingProvider.start(request);
+      return { ok: true, sessionId: request.sessionId };
+    } catch (error) {
+      return { ok: false, message: readErrorMessage(error, "Failed to start speech stream") };
+    }
+  });
+
+  ipcMain.handle("voice:stream-chunk", async (_event, input: unknown): Promise<SpeechStreamChunkResponseDto> => {
+    const request = parseSpeechStreamChunkRequest(input);
+    if (!request) return { ok: false, message: "Invalid speech stream chunk request" };
+    if (!deps.speechStreamingProvider) return { ok: false, message: "ASR streaming provider is not configured" };
+
+    try {
+      await deps.speechStreamingProvider.pushChunk({
+        sessionId: request.sessionId,
+        sequence: request.sequence,
+        sampleRate: request.sampleRate,
+        pcm: Buffer.from(request.pcmBase64, "base64"),
+        isFinal: request.isFinal
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: readErrorMessage(error, "Failed to push speech stream chunk") };
+    }
+  });
+
+  ipcMain.handle("voice:stream-finish", async (event, input: unknown): Promise<SpeechStreamFinishResponseDto> => {
+    const request = parseSpeechStreamFinishRequest(input);
+    if (!request) return { ok: false, message: "Invalid speech stream finish request" };
+    if (!deps.speechStreamingProvider) return { ok: false, message: "ASR streaming provider is not configured" };
+
+    try {
+      const result = await deps.speechStreamingProvider.finish(request);
+      if (result.error) return { ok: false, message: result.error, transcript: result.transcript };
+      sendSpeechTranscriptDelta(event.sender, request.sessionId, {
+        text: result.transcript,
+        confidence: result.confidence,
+        language: result.language
+      });
+      return {
+        ok: true,
+        transcript: result.transcript,
+        confidence: result.confidence,
+        language: result.language
+      };
+    } catch (error) {
+      return { ok: false, message: readErrorMessage(error, "Failed to finish speech stream") };
+    }
+  });
+
+  ipcMain.handle("voice:stream-cancel", async (_event, input: unknown): Promise<SpeechStreamChunkResponseDto> => {
+    const request = parseSpeechStreamFinishRequest(input);
+    if (!request) return { ok: false, message: "Invalid speech stream cancel request" };
+    if (!deps.speechStreamingProvider) return { ok: false, message: "ASR streaming provider is not configured" };
+
+    try {
+      await deps.speechStreamingProvider.cancel(request);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: readErrorMessage(error, "Failed to cancel speech stream") };
+    }
   });
 
   ipcMain.handle("action:execute", async (_event, request: unknown) => {
@@ -564,6 +642,53 @@ function parseSynthesizeSpeechRequest(input: unknown): SynthesizeSpeechRequestDt
   };
 }
 
+// 校验流式 ASR start 请求, 限定在当前 renderer 支持的 16k/PCM 分片协议内.
+function parseSpeechStreamStartRequest(input: unknown): SpeechStreamStartRequestDto | null {
+  if (!input || typeof input !== "object") return null;
+  const request = input as SpeechStreamStartRequestDto;
+  if (!isSpeechStreamSessionId(request.sessionId)) return null;
+  if (!ALLOWED_SPEECH_STREAM_SAMPLE_RATES.has(request.sampleRate)) return null;
+  if (!Number.isInteger(request.frameMs) || request.frameMs < 40 || request.frameMs > 500) return null;
+  return {
+    sessionId: request.sessionId,
+    sampleRate: request.sampleRate,
+    frameMs: request.frameMs
+  };
+}
+
+// 校验并归一化语音分片, base64 只允许标准字符并限制最大分片.
+function parseSpeechStreamChunkRequest(input: unknown): SpeechStreamChunkRequestDto | null {
+  if (!input || typeof input !== "object") return null;
+  const request = input as SpeechStreamChunkRequestDto;
+  if (!isSpeechStreamSessionId(request.sessionId)) return null;
+  if (!Number.isInteger(request.sequence) || request.sequence < 0 || request.sequence > 100000) return null;
+  if (!ALLOWED_SPEECH_STREAM_SAMPLE_RATES.has(request.sampleRate)) return null;
+  if (typeof request.pcmBase64 !== "string" || request.pcmBase64.length === 0) return null;
+  if (request.pcmBase64.length > MAX_SPEECH_STREAM_CHUNK_BASE64_LENGTH) return null;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(request.pcmBase64) || request.pcmBase64.length % 4 !== 0) return null;
+  if (request.isFinal !== undefined && typeof request.isFinal !== "boolean") return null;
+  return {
+    sessionId: request.sessionId,
+    sequence: request.sequence,
+    sampleRate: request.sampleRate,
+    pcmBase64: request.pcmBase64,
+    isFinal: request.isFinal
+  };
+}
+
+// 校验流式 ASR finish/cancel 请求.
+function parseSpeechStreamFinishRequest(input: unknown): SpeechStreamFinishRequestDto | null {
+  if (!input || typeof input !== "object") return null;
+  const request = input as SpeechStreamFinishRequestDto;
+  if (!isSpeechStreamSessionId(request.sessionId)) return null;
+  return { sessionId: request.sessionId };
+}
+
+// 限制 sessionId 为本地生成的短令牌, 避免把任意字符串带入日志和文件名.
+function isSpeechStreamSessionId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
 // 发送流式增量前检查 WebContents 生命周期, 避免窗口关闭后继续投递 IPC.
 function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
   if (sender.isDestroyed()) return;
@@ -572,6 +697,32 @@ function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
   } catch {
     return;
   }
+}
+
+// 发送语音转写结果, 真实 WebSocket provider 后续可以复用这个通道发送 partial.
+function sendSpeechTranscriptDelta(
+  sender: WebContents,
+  sessionId: string,
+  result: { text: string; confidence?: number; language?: string }
+) {
+  if (sender.isDestroyed()) return;
+  try {
+    sender.send("voice:transcript-delta", {
+      sessionId,
+      sequence: 0,
+      text: result.text,
+      isFinal: true,
+      confidence: result.confidence,
+      language: result.language
+    });
+  } catch {
+    return;
+  }
+}
+
+// 把未知异常归一化为可展示的错误消息.
+function readErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
 }
 
 // 判断传入值是否是受支持的面板名称.

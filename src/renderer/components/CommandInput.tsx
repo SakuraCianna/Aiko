@@ -10,6 +10,7 @@ import {
   type ChatPayload
 } from "../../shared/chatPayload";
 import { createAudioAttachmentFromBlob, createWavAudioRecorder, type WavAudioRecorder } from "../audio/microphoneRecorder";
+import { createStreamingAsrController, type StreamingAsrController } from "../audio/streamingAsrController";
 
 type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;
@@ -23,16 +24,28 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const [isRecording, setIsRecording] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<WavAudioRecorder | null>(null);
+  const streamingAsrRef = useRef<StreamingAsrController | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const recordingSessionRef = useRef<string | null>(null);
+  const recordingModeRef = useRef<"streaming" | "attachment" | null>(null);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
       cleanupRecording();
     };
+  }, []);
+
+  useEffect(() => {
+    // 接收实时 ASR partial/final 转写, 真实 WebSocket provider 接入后会边说边更新输入框.
+    return window.aiko.onSpeechTranscriptDelta((delta) => {
+      if (!mountedRef.current || delta.sessionId !== recordingSessionRef.current) return;
+      const transcript = delta.text.trim();
+      if (transcript.length === 0) return;
+      setValue(transcript);
+    });
   }, []);
 
   // 提交当前文本和附件.
@@ -92,7 +105,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     appendAttachments(nextAttachments);
   }
 
-  // 切换语音输入, 默认录音为 WAV 附件, 再交给主进程腾讯云 ASR 理解.
+  // 切换语音输入, 优先走流式 ASR, 不可用时降级为 WAV 附件提交.
   async function toggleVoiceInput() {
     setError("");
 
@@ -101,16 +114,11 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
-    await toggleAudioAttachmentRecording();
+    await startStreamingVoiceInput();
   }
 
-  // 开始或停止旧版默认麦克风录音附件模式.
-  async function toggleAudioAttachmentRecording() {
-    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
-      setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
-      return;
-    }
-
+  // 开始麦克风流式转写, renderer 会边录边把 PCM16 分片推给主进程.
+  async function startStreamingVoiceInput() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("当前环境无法调用麦克风录音.");
       return;
@@ -128,13 +136,26 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       }
 
       streamRef.current = stream;
-      const recorder = await createWavAudioRecorder(stream);
+      const streamingController = createStreamingAsrController({
+        api: window.aiko,
+        createRecorder: createWavAudioRecorder,
+        createSessionId: () => sessionId
+      });
+      const startResult = await streamingController.start(stream);
       if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
-        void recorder.stop();
+        void streamingController.cancel();
         stopMicrophoneStream();
         return;
       }
-      recorderRef.current = recorder;
+
+      if (startResult.ok) {
+        streamingAsrRef.current = streamingController;
+        recordingModeRef.current = "streaming";
+        return;
+      }
+
+      const fallbackStarted = await startAudioAttachmentRecordingFromStream(stream, sessionId);
+      if (fallbackStarted && mountedRef.current) setError("实时语音暂时不可用, 已切换为录音片段提交.");
     } catch {
       if (recordingSessionRef.current !== sessionId) return;
       cleanupRecording();
@@ -142,18 +163,60 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     }
   }
 
+  // 当流式 ASR 不可用时复用同一个麦克风流, 回退成原有 WAV 附件链路.
+  async function startAudioAttachmentRecordingFromStream(stream: MediaStream, sessionId: string): Promise<boolean> {
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      cleanupRecording();
+      if (mountedRef.current) setError(`最多只能同时上传 ${MAX_ATTACHMENTS} 个附件.`);
+      return false;
+    }
+
+    const recorder = await createWavAudioRecorder(stream);
+    if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
+      void recorder.stop();
+      stopMicrophoneStream();
+      return false;
+    }
+    recorderRef.current = recorder;
+    recordingModeRef.current = "attachment";
+    return true;
+  }
+
   // 停止录音后把音频片段转换成聊天附件.
   async function finishRecording(sessionId: string) {
     if (recordingSessionRef.current !== sessionId) return;
 
+    const mode = recordingModeRef.current;
     const recorder = recorderRef.current;
+    const streamingController = streamingAsrRef.current;
     recordingSessionRef.current = null;
+    recordingModeRef.current = null;
     recorderRef.current = null;
-    stopMicrophoneStream();
+    streamingAsrRef.current = null;
     if (mountedRef.current) setIsRecording(false);
 
     if (!mountedRef.current) return;
 
+    if (mode === "streaming" && streamingController) {
+      try {
+        const result = await streamingController.stop();
+        stopMicrophoneStream();
+        if (!mountedRef.current) return;
+        if (!result.ok) {
+          setError(`语音转写失败: ${result.message}`);
+          return;
+        }
+        submitVoiceTranscript(result.transcript);
+      } catch (error) {
+        stopMicrophoneStream();
+        if (mountedRef.current) {
+          setError(error instanceof Error ? `语音转写失败: ${error.message}` : "语音转写失败.");
+        }
+      }
+      return;
+    }
+
+    stopMicrophoneStream();
     if (!recorder) {
       setError("没有录到有效语音.");
       return;
@@ -168,6 +231,18 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     const attachment = await createAudioAttachmentFromBlob(blob);
     if (!mountedRef.current) return;
     submitPayload(value, [...attachmentsRef.current, attachment]);
+  }
+
+  // 把最终转写和用户手动输入合并后发送, 让语音入口进入同一条 Agent 链路.
+  function submitVoiceTranscript(transcript: string) {
+    const normalizedTranscript = transcript.trim();
+    if (!normalizedTranscript) {
+      setError("没有识别到有效语音.");
+      return;
+    }
+
+    const mergedText = [value.trim(), normalizedTranscript].filter(Boolean).join("\n");
+    submitPayload(mergedText);
   }
 
   // 同步附件状态和附件引用, 避免异步回调使用过期数组.
@@ -190,9 +265,13 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   // 停止当前录音会话并释放关联资源.
   function cleanupRecording() {
     recordingSessionRef.current = null;
+    recordingModeRef.current = null;
     const recorder = recorderRef.current;
+    const streamingController = streamingAsrRef.current;
     recorderRef.current = null;
+    streamingAsrRef.current = null;
     if (recorder) void recorder.stop();
+    if (streamingController) void streamingController.cancel();
     stopMicrophoneStream();
     if (mountedRef.current) setIsRecording(false);
   }

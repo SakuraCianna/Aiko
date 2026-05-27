@@ -11,7 +11,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限
 - 记忆系统: Node 24 `node:sqlite` + `sqlite-vec` 兼容向量索引
 - 网页搜索: Tavily MCP, 仅在用户明确要求新闻, 最新信息或网页搜索时触发
 - 天气: Open-Meteo typed tool
-- 语音: 腾讯云 ASR/TTS, TTS 支持分句队列, 中止和 VRM 口型联动
+- 语音: AudioWorklet 麦克风录音 + 流式 ASR 接口层 + 腾讯云 ASR/TTS, TTS 支持分句队列, 中止和 VRM 口型联动
 - 权限: 本地能力走确认弹窗, 权限矩阵和动作审计日志
 
 ## 当前能力
@@ -21,7 +21,8 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限
 - Electron 桌宠窗口和管理面板
 - VRM 模型加载, lookAt, 待机, 思考, 说话, 执行, 成功, 失败, 拖拽等基础动作
 - TTS 播放时驱动 VRM 嘴部开合
-- 麦克风录音提交到 ASR 链路
+- 麦克风录音通过 AudioWorklet 采集 PCM, 已支持边录边分片推送到主进程 ASR 流式接口
+- 当前流式接口先使用 buffered provider 兼容腾讯云一句话识别, 后续可替换为腾讯云实时 WebSocket provider
 - GLM OpenAI-compatible 模型调用和 fallback 模型路由
 - LangGraph 审批流, 支持确认, 取消, resume 和 SQLite checkpoint
 - 本地对话上下文, 新对话, 清空上下文和删除当前对话意图识别
@@ -41,8 +42,8 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限
 
 仍未完成:
 
-- 真正低延迟双工实时语音, 当前仍是录音片段提交 + 回复播放
-- 流式 ASR
+- 真正低延迟双工实时语音, 当前仍是分片采集 + 结束后最终转写 + 回复播放
+- 腾讯云实时 ASR WebSocket provider 和 partial transcript
 - zero-shot voice cloning
 - 窗口控制, 截图分析, 键鼠自动化
 - Shell 命令完整回滚后台
@@ -135,6 +136,7 @@ src/main/memory/                    长期记忆候选, 分类和召回
 src/renderer/App.tsx                桌宠主界面
 src/renderer/components/            输入框, 面板, 确认框, 任务卡片和审计面板
 src/renderer/character/             VRM 渲染器和动作控制
+src/renderer/audio/                 麦克风 AudioWorklet 录音, PCM 分片, 流式 ASR 控制器和 WAV 封装
 src/renderer/voice/                 语音播放队列和口型联动
 人物设定.md                         Aiko 的角色人格和提示词设定
 docs/人物UI.md                      角色 UI 和人物模型路线说明
