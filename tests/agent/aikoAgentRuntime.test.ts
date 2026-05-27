@@ -61,6 +61,9 @@ describe("Aiko persona prompt", () => {
     expect(prompt).toContain("propose_open_application");
     expect(prompt).toContain("连续调用多个 propose_* 工具");
     expect(prompt).toContain("不要输出自造 JSON");
+    expect(prompt).toContain("propose_read_file");
+    expect(prompt).toContain("propose_run_shell_command");
+    expect(prompt).toContain("高风险动作");
   });
 });
 

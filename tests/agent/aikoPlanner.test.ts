@@ -148,6 +148,60 @@ describe("createAikoPlanner", () => {
     });
   });
 
+  it("plans explicit directory listing requests as medium-risk confirmed actions", async () => {
+    const planner = createAikoPlanner();
+
+    const plan = await planner.plan({
+      userText: "帮我列出 E:\\CodeHome\\Aiko 目录",
+      userTranscript: "帮我列出 E:\\CodeHome\\Aiko 目录",
+      toolHints: []
+    });
+
+    expect(plan.steps[0]?.action).toMatchObject({
+      title: "列出目录:E:\\CodeHome\\Aiko",
+      capability: "list_directory",
+      risk: "medium",
+      target: "E:\\CodeHome\\Aiko"
+    });
+  });
+
+  it("plans explicit local file reads as high-risk confirmed actions", async () => {
+    const planner = createAikoPlanner();
+
+    const plan = await planner.plan({
+      userText: "读取 E:\\CodeHome\\Aiko\\README.md",
+      userTranscript: "读取 E:\\CodeHome\\Aiko\\README.md",
+      toolHints: []
+    });
+
+    expect(plan.steps[0]?.action).toMatchObject({
+      title: "读取文件:E:\\CodeHome\\Aiko\\README.md",
+      capability: "read_file",
+      risk: "high",
+      target: "E:\\CodeHome\\Aiko\\README.md"
+    });
+  });
+
+  it("plans explicit PowerShell command requests as high-risk confirmed actions", async () => {
+    const planner = createAikoPlanner();
+
+    const plan = await planner.plan({
+      userText: "运行 PowerShell 命令 Get-ChildItem -Name",
+      userTranscript: "运行 PowerShell 命令 Get-ChildItem -Name",
+      toolHints: []
+    });
+
+    expect(plan.steps[0]?.action).toMatchObject({
+      title: "执行 Shell:Get-ChildItem -Name",
+      capability: "run_shell_command",
+      risk: "high",
+      target: "Get-ChildItem -Name",
+      params: {
+        command: "Get-ChildItem -Name"
+      }
+    });
+  });
+
   it("returns chat mode when no deterministic action is detected", async () => {
     const planner = createAikoPlanner();
 

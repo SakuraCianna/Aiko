@@ -133,6 +133,15 @@ export function detectDeterministicAction(input: string, now: () => Date = () =>
     });
   }
 
+  const shellCommand = detectShellCommandRequest(text);
+  if (shellCommand) return shellCommand;
+
+  const directoryListing = detectDirectoryListingRequest(text);
+  if (directoryListing) return directoryListing;
+
+  const fileRead = detectFileReadRequest(text);
+  if (fileRead) return fileRead;
+
   const openMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:打开|启动|运行|开启|开一下)\s*(?:一下)?\s*(.+)$/);
   if (openMatch?.[1]) {
     const query = normalizeApplicationQuery(openMatch[1]);
@@ -171,6 +180,57 @@ export function detectDeterministicAction(input: string, now: () => Date = () =>
   if (absoluteReminder) return absoluteReminder;
 
   return null;
+}
+
+// 识别用户明确要求执行的 PowerShell 或 Shell 命令, 并保持高风险确认边界.
+function detectShellCommandRequest(text: string): DetectedAction | null {
+  const match = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:运行|执行)\s*(?:PowerShell|powershell|Shell|shell|终端)?\s*(?:命令|指令)\s*(.+)$/);
+  const command = cleanupLocalTarget(match?.[1] ?? "");
+  if (!command) return null;
+
+  return toDetectedAction({
+      title: `执行 Shell:${command}`,
+      source: text,
+      risk: "high",
+      capability: "run_shell_command",
+      target: command,
+      params: {
+        command
+      }
+  });
+}
+
+// 识别明确的本地目录列举请求, 不把普通"查看新闻/天气"误判成文件系统访问.
+function detectDirectoryListingRequest(text: string): DetectedAction | null {
+  const explicitMatch = text.match(
+    /^(?:请|麻烦)?(?:你)?(?:帮我)?(?:列出|查看|看看|显示)\s+(.+?)(?:的)?\s*(?:目录|文件夹)(?:内容|列表)?$/
+  );
+  const pathLikeMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:列出|查看|看看|显示)\s+(.+)$/);
+  const target = cleanupLocalTarget(explicitMatch?.[1] ?? (pathLikeMatch?.[1] && looksLikeLocalDirectoryPath(pathLikeMatch[1]) ? pathLikeMatch[1] : ""));
+  if (!target || !looksLikeLocalPath(target)) return null;
+
+  return toDetectedAction({
+      title: `列出目录:${target}`,
+      source: text,
+      risk: "medium",
+      capability: "list_directory",
+      target
+  });
+}
+
+// 识别明确的本地文本文件读取请求, 读取动作必须进入高风险确认.
+function detectFileReadRequest(text: string): DetectedAction | null {
+  const match = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:读取|读一下|查看|看看)\s+(.+)$/);
+  const target = cleanupLocalTarget(match?.[1] ?? "").replace(/(?:文件|内容)$/u, "").trim();
+  if (!target || !looksLikeLocalFilePath(target)) return null;
+
+  return toDetectedAction({
+      title: `读取文件:${target}`,
+      source: text,
+      risk: "high",
+      capability: "read_file",
+      target
+  });
 }
 
 // 把一句话里的多个本地动作拆成候选片段.
@@ -323,6 +383,29 @@ function normalizeDefaultApplicationKind(rawKind: string): string {
     网页浏览器: "浏览器"
   };
   return aliases[normalized] ?? kind;
+}
+
+// 清理本地目标路径或命令外围标点, 不改变内部空格和反斜杠.
+function cleanupLocalTarget(input: string): string {
+  return input.trim().replace(/^["'“”‘’]+|["'“”‘’。.!！?？]+$/g, "").trim();
+}
+
+// 判断文本是否像本地路径, 避免普通知识查询进入文件系统动作.
+function looksLikeLocalPath(input: string): boolean {
+  const target = cleanupLocalTarget(input);
+  return /^[a-zA-Z]:[\\/]/.test(target) || /^[.]{1,2}[\\/]/.test(target) || target.includes("\\") || target.includes("/");
+}
+
+// 判断文本是否像目录路径.
+function looksLikeLocalDirectoryPath(input: string): boolean {
+  const target = cleanupLocalTarget(input);
+  return looksLikeLocalPath(target) && !/\.[a-zA-Z0-9]{1,12}$/.test(target);
+}
+
+// 判断文本是否像可读取的本地文本文件路径.
+function looksLikeLocalFilePath(input: string): boolean {
+  const target = cleanupLocalTarget(input);
+  return looksLikeLocalPath(target) && /\.(?:txt|md|markdown|json|jsonl|ts|tsx|js|jsx|mjs|cjs|css|html|xml|yaml|yml|toml|ini|log|csv)$/i.test(target);
 }
 
 // 根据搜索词生成默认 Bing 搜索 URL.
