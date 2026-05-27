@@ -263,6 +263,42 @@ describe("registerAikoHandlers pending action approvals", () => {
       frameMs: 200
     })).resolves.toEqual({ ok: false, message: "ASR streaming provider is not configured" });
   });
+
+  it("accepts restore-from-trash actions prepared by the action audit panel", async () => {
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications()
+    });
+
+    await expect(callHandler("action:execute", {
+      remember: false,
+      action: {
+        id: "restore-1",
+        title: "恢复文件",
+        source: "动作审计",
+        risk: "high",
+        capability: "restore_file_from_trash",
+        target: "C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\.trash\\note.md",
+        params: {
+          destinationPath: "C:\\Users\\Sakura_Cianna\\Desktop\\note.md"
+        }
+      }
+    })).resolves.toMatchObject({
+      ok: false,
+      message: "这个操作已过期或被修改,请重新发起."
+    });
+  });
 });
 
 function createRuntime(options: {

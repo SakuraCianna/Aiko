@@ -48,6 +48,23 @@ describe("createAikoFileSystem", () => {
     await expect(fs.readTextFile(path.join(root, "..", "outside.txt"))).rejects.toThrow("outside allowed roots");
   });
 
+  it("treats Windows allowed roots as case-insensitive", async () => {
+    if (process.platform !== "win32") return;
+    const filePath = path.join(root, "note.md");
+    writeFileSync(filePath, "Aiko", "utf8");
+    const fs = createAikoFileSystem({ allowedRoots: [root.toUpperCase()], trashDir: path.join(root, ".trash") });
+
+    await expect(fs.readTextFile(filePath)).resolves.toBe("Aiko");
+  });
+
+  it("blocks environment variable variants from file access", async () => {
+    const fs = createAikoFileSystem({ allowedRoots: [root], trashDir: path.join(root, ".trash") });
+    const filePath = path.join(root, ".env.production");
+    writeFileSync(filePath, "SECRET=value", "utf8");
+
+    await expect(fs.readTextFile(filePath)).rejects.toThrow("sensitive file is blocked");
+  });
+
   it("moves deleted files to the Aiko trash folder", async () => {
     const fs = createAikoFileSystem({ allowedRoots: [root], trashDir: path.join(root, ".trash") });
     const filePath = path.join(root, "old.txt");

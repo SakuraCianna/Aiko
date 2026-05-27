@@ -874,6 +874,16 @@ function isSupportedAction(action: PendingActionDto, depth = 0): boolean {
     return action.target.trim().length > 0 && action.target.length <= 2048;
   }
 
+  if (action.capability === "restore_file_from_trash") {
+    const destinationPath = action.params?.destinationPath;
+    return (
+      action.risk === "high" &&
+      action.target.trim().length > 0 &&
+      action.target.length <= 2048 &&
+      (destinationPath === undefined || (typeof destinationPath === "string" && destinationPath.length <= 2048))
+    );
+  }
+
   if (action.capability === "write_file") {
     const params = action.params;
     return (

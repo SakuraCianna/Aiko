@@ -40,7 +40,7 @@ export type AikoFileSystemOptions = {
 
 const DEFAULT_MAX_READ_BYTES = 256 * 1024;
 const DEFAULT_LIST_LIMIT = 200;
-const SENSITIVE_FILE_NAMES = new Set([".env", ".env.local", ".npmrc", "id_rsa", "id_ed25519"]);
+const SENSITIVE_FILE_NAMES = new Set([".npmrc", "id_rsa", "id_ed25519"]);
 
 // 创建 Aiko 的受控文件系统能力, 所有路径必须落在允许根目录内.
 export function createAikoFileSystem(options: AikoFileSystemOptions = {}): AikoFileSystem {
@@ -150,7 +150,11 @@ function assertAllowedFilePath(inputPath: string, allowedRoots: string[]) {
 
 // 确认路径在某个允许根目录内.
 function assertPathInsideAnyRoot(resolvedPath: string, roots: string[], message: string) {
-  const allowed = roots.some((root) => resolvedPath === root || resolvedPath.startsWith(`${root}${path.sep}`));
+  const normalizedPath = normalizePathForRootCompare(resolvedPath);
+  const allowed = roots.some((root) => {
+    const normalizedRoot = normalizePathForRootCompare(root);
+    return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}${path.sep}`);
+  });
   if (!allowed) throw new Error(message);
 }
 
@@ -162,9 +166,16 @@ function assertPathInsideRoot(resolvedPath: string, root: string, message: strin
 
 // 拒绝常见密钥和环境变量文件, 避免模型把敏感内容读写进上下文.
 function assertNotSensitivePath(filePath: string) {
-  if (SENSITIVE_FILE_NAMES.has(path.basename(filePath).toLowerCase())) {
+  const basename = path.basename(filePath).toLowerCase();
+  if (basename === ".env" || basename.startsWith(".env.") || SENSITIVE_FILE_NAMES.has(basename)) {
     throw new Error("sensitive file is blocked");
   }
+}
+
+// Windows 路径大小写不敏感, 根目录比较也必须保持同样语义.
+function normalizePathForRootCompare(filePath: string) {
+  const resolved = path.resolve(filePath);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 // 覆盖写入前备份旧文件, 给高风险写操作留下可恢复入口.
