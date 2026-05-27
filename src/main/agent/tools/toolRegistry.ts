@@ -88,6 +88,69 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     planOnly: true
   },
   {
+    name: "list_directory",
+    description: "提出列出本地目录内容的待确认动作. 只生成动作, 不直接读取.",
+    capability: "list_directory",
+    risk: "medium",
+    requiresConfirmation: true,
+    schema: {
+      path: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "read_file",
+    description: "提出读取本地文本文件的高风险待确认动作. 只生成动作, 不直接读取.",
+    capability: "read_file",
+    risk: "high",
+    requiresConfirmation: true,
+    schema: {
+      path: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "write_file",
+    description: "提出写入本地文本文件的高风险待确认动作. 只生成动作, 不直接写入.",
+    capability: "write_file",
+    risk: "high",
+    requiresConfirmation: true,
+    schema: {
+      path: "string",
+      content: "string",
+      overwrite: "boolean?",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "delete_file",
+    description: "提出把本地文件移动到 Aiko trash 的高风险待确认动作. 只生成动作, 不直接删除.",
+    capability: "delete_file",
+    risk: "high",
+    requiresConfirmation: true,
+    schema: {
+      path: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "run_shell_command",
+    description: "提出执行受控 PowerShell 命令的高风险待确认动作. 只生成动作, 不直接执行.",
+    capability: "run_shell_command",
+    risk: "high",
+    requiresConfirmation: true,
+    schema: {
+      command: "string",
+      cwd: "string?",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
     name: "recall_memory",
     description: "查询本地长期记忆.只用于上下文检索,不执行系统操作.",
     capability: "recall_memory",

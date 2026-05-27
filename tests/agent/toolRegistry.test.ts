@@ -12,6 +12,11 @@ describe("createDefaultToolRegistry", () => {
       "create_reminder",
       "cancel_reminder",
       "write_desktop_markdown",
+      "list_directory",
+      "read_file",
+      "write_file",
+      "delete_file",
+      "run_shell_command",
       "recall_memory",
       "list_reminders"
     ]);
@@ -24,6 +29,23 @@ describe("createDefaultToolRegistry", () => {
         query: "string",
         source: "string?"
       },
+      planOnly: true
+    });
+  });
+
+  it("exposes high-risk system tools as plan-only confirmed actions", () => {
+    const registry = createDefaultToolRegistry();
+
+    expect(registry.get("run_shell_command")).toMatchObject({
+      capability: "run_shell_command",
+      risk: "high",
+      requiresConfirmation: true,
+      planOnly: true
+    });
+    expect(registry.get("write_file")).toMatchObject({
+      capability: "write_file",
+      risk: "high",
+      requiresConfirmation: true,
       planOnly: true
     });
   });

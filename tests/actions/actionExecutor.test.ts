@@ -273,25 +273,111 @@ describe("createActionExecutor", () => {
     expect(result.message).toContain("这组操作我处理完了");
   });
 
-  it("rejects high-risk actions", async () => {
+  it("runs high-risk shell actions through the injected runner after approval", async () => {
+    const executed: string[] = [];
     const executor = createActionExecutor({
       openUrl: async () => undefined,
       openApplication: async () => false,
+      shellCommandRunner: async (request) => {
+        executed.push(request.command);
+        return { exitCode: 0, stdout: "ok", stderr: "", timedOut: false };
+      },
       now: () => new Date("2026-05-19T10:00:00.000Z")
     });
 
     const result = await executor.execute({
       action: {
-        ...lowRiskAction("shell_command", "Remove-Item"),
-        risk: "high"
+        title: "Run shell",
+        source: "test",
+        risk: "high",
+        capability: "run_shell_command",
+        target: "Get-ChildItem",
+        params: { command: "Get-ChildItem -Name" }
+      },
+      remember: true
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("ok");
+    expect(executed).toEqual(["Get-ChildItem -Name"]);
+    expect(executor.listRememberedActions()).toEqual([]);
+  });
+
+  it("rejects dangerous shell commands before invoking the runner", async () => {
+    let invoked = false;
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      shellCommandRunner: async () => {
+        invoked = true;
+        return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+      },
+      now: () => new Date("2026-05-19T10:00:00.000Z")
+    });
+
+    const result = await executor.execute({
+      action: {
+        title: "Run shell",
+        source: "test",
+        risk: "high",
+        capability: "run_shell_command",
+        target: "Remove-Item",
+        params: { command: "Remove-Item -Recurse C:\\Temp" }
       },
       remember: false
     });
 
-    expect(result).toEqual({
-      ok: false,
-      message: "这个动作风险偏高, 我先不碰. 稳一点比较好."
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("blocked");
+    expect(invoked).toBe(false);
+  });
+
+  it("executes high-risk file actions through the injected file system", async () => {
+    const writes: Array<{ filePath: string; content: string; overwrite: boolean }> = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      fileSystem: {
+        readTextFile: async () => "file-content",
+        writeTextFile: async (filePath, content, options) => {
+          writes.push({ filePath, content, overwrite: options.overwrite });
+        },
+        listDirectory: async () => [{ name: "note.md", path: "C:\\Aiko\\note.md", kind: "file" }],
+        moveToTrash: async (filePath) => ({ originalPath: filePath, trashPath: "C:\\Aiko\\.trash\\note.md" })
+      },
+      now: () => new Date("2026-05-19T10:00:00.000Z")
     });
+
+    const read = await executor.execute({
+      action: { title: "Read file", source: "test", risk: "high", capability: "read_file", target: "C:\\Aiko\\note.md" },
+      remember: true
+    });
+    const write = await executor.execute({
+      action: {
+        title: "Write file",
+        source: "test",
+        risk: "high",
+        capability: "write_file",
+        target: "C:\\Aiko\\note.md",
+        params: { content: "new", overwrite: true }
+      },
+      remember: true
+    });
+    const list = await executor.execute({
+      action: { title: "List directory", source: "test", risk: "medium", capability: "list_directory", target: "C:\\Aiko" },
+      remember: false
+    });
+    const deleted = await executor.execute({
+      action: { title: "Delete file", source: "test", risk: "high", capability: "delete_file", target: "C:\\Aiko\\note.md" },
+      remember: true
+    });
+
+    expect(read.message).toContain("file-content");
+    expect(write.ok).toBe(true);
+    expect(list.message).toContain("note.md");
+    expect(deleted.message).toContain(".trash");
+    expect(writes).toEqual([{ filePath: "C:\\Aiko\\note.md", content: "new", overwrite: true }]);
+    expect(executor.listRememberedActions()).toEqual([]);
   });
 
   it("uses injected repositories for remembered rules and reminders", async () => {

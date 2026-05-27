@@ -1149,6 +1149,11 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
   const createReminder = registry.get("create_reminder");
   const cancelReminder = registry.get("cancel_reminder");
   const writeDesktopMarkdown = registry.get("write_desktop_markdown");
+  const listDirectory = registry.get("list_directory");
+  const readFile = registry.get("read_file");
+  const writeFile = registry.get("write_file");
+  const deleteFile = registry.get("delete_file");
+  const runShellCommand = registry.get("run_shell_command");
 
   return [
     // 生成打开应用的待确认动作.
@@ -1290,6 +1295,122 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
         schema: z.object({
           title: z.string().min(1).max(120).describe("Markdown 文件标题,默认使用 Aiko回答"),
           content: z.string().min(1).max(200000).describe("要写入 Markdown 的完整正文"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成列出本地目录内容的待确认动作.
+    tool(
+      ({ path, source }) => {
+        proposedActions.push({
+          title: `列出目录:${path}`,
+          source: source || path,
+          risk: "medium",
+          capability: "list_directory",
+          target: path
+        });
+        return "已生成列出目录的待确认动作.";
+      },
+      {
+        name: "propose_list_directory",
+        description: listDirectory?.description ?? "提出列出本地目录内容的待确认动作. 只生成动作, 不直接读取.",
+        schema: z.object({
+          path: z.string().min(1).max(2048).describe("要列出的本地目录路径"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成读取本地文本文件的高风险待确认动作.
+    tool(
+      ({ path, source }) => {
+        proposedActions.push({
+          title: `读取文件:${path}`,
+          source: source || path,
+          risk: "high",
+          capability: "read_file",
+          target: path
+        });
+        return "已生成读取文件的高风险待确认动作.";
+      },
+      {
+        name: "propose_read_file",
+        description: readFile?.description ?? "提出读取本地文本文件的高风险待确认动作. 只生成动作, 不直接读取.",
+        schema: z.object({
+          path: z.string().min(1).max(2048).describe("要读取的本地文本文件路径"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成写入本地文本文件的高风险待确认动作.
+    tool(
+      ({ path, content, overwrite, source }) => {
+        proposedActions.push({
+          title: `写入文件:${path}`,
+          source: source || path,
+          risk: "high",
+          capability: "write_file",
+          target: path,
+          params: {
+            content,
+            overwrite: overwrite ?? false
+          }
+        });
+        return "已生成写入文件的高风险待确认动作.";
+      },
+      {
+        name: "propose_write_file",
+        description: writeFile?.description ?? "提出写入本地文本文件的高风险待确认动作. 只生成动作, 不直接写入.",
+        schema: z.object({
+          path: z.string().min(1).max(2048).describe("要写入的本地文本文件路径"),
+          content: z.string().min(1).max(200000).describe("要写入文件的 UTF-8 文本内容"),
+          overwrite: z.boolean().optional().describe("是否允许覆盖已有文件"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成移动文件到 Aiko trash 的高风险待确认动作.
+    tool(
+      ({ path, source }) => {
+        proposedActions.push({
+          title: `删除文件:${path}`,
+          source: source || path,
+          risk: "high",
+          capability: "delete_file",
+          target: path
+        });
+        return "已生成删除文件的高风险待确认动作.";
+      },
+      {
+        name: "propose_delete_file",
+        description: deleteFile?.description ?? "提出把本地文件移动到 Aiko trash 的高风险待确认动作. 只生成动作, 不直接删除.",
+        schema: z.object({
+          path: z.string().min(1).max(2048).describe("要移动到 Aiko trash 的本地文件路径"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成受控 PowerShell 命令的高风险待确认动作.
+    tool(
+      ({ command, cwd, source }) => {
+        proposedActions.push({
+          title: `执行 Shell:${command}`,
+          source: source || command,
+          risk: "high",
+          capability: "run_shell_command",
+          target: command,
+          params: {
+            command,
+            ...(cwd ? { cwd } : {})
+          }
+        });
+        return "已生成执行 Shell 命令的高风险待确认动作.";
+      },
+      {
+        name: "propose_run_shell_command",
+        description: runShellCommand?.description ?? "提出执行受控 PowerShell 命令的高风险待确认动作. 只生成动作, 不直接执行.",
+        schema: z.object({
+          command: z.string().min(1).max(2000).describe("要执行的 PowerShell 命令"),
+          cwd: z.string().max(2048).optional().describe("命令工作目录"),
           source: z.string().optional().describe("用户原始请求")
         })
       }

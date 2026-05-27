@@ -20,11 +20,11 @@ describe("permissionService", () => {
     });
   });
 
-  it("blocks high-risk actions in the first version", () => {
+  it("requires confirmation for high-risk actions and never auto-allows them", () => {
     const service = createPermissionService([]);
     expect(service.canExecute({ capability: "shell_command", target: "Remove-Item", risk: "high" })).toEqual({
       allowed: false,
-      reason: "unsupported_high_risk"
+      reason: "confirmation_required"
     });
   });
 

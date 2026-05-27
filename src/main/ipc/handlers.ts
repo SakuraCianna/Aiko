@@ -7,8 +7,10 @@ import { createAikoActionExecutionWorkflow } from "../agent/graph/aikoAgentWorkf
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 import { discoverApplications } from "../capabilities/applicationCatalog";
+import { createAikoFileSystem } from "../capabilities/aikoFileSystem";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
+import { createPowerShellCommandRunner } from "../capabilities/shellCommand";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 import type {
   ApplicationPreferenceRepository,
@@ -53,10 +55,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const streamControllers = new Map<string, AbortController>();
   const getApplications = deps.applicationProvider ?? (() => discoverApplications());
   const writeDesktopMarkdown = createDesktopMarkdownWriter();
+  const fileSystem = createAikoFileSystem();
+  const shellCommandRunner = createPowerShellCommandRunner();
   const actionExecutor = createActionExecutor({
     openUrl,
     openApplication: (query, expectedPath) => openApplication(getApplications(), query, expectedPath),
     writeDesktopMarkdown,
+    fileSystem,
+    shellCommandRunner,
     actionJournal: deps.actionJournal,
     hooks: deps.hooks,
     now: () => new Date(),
@@ -642,6 +648,37 @@ function isSupportedAction(action: PendingActionDto, depth = 0): boolean {
       typeof params.content === "string" &&
       params.content.trim().length > 0 &&
       params.content.length <= 200000
+    );
+  }
+
+  if (action.capability === "run_shell_command") {
+    const params = action.params;
+    return (
+      action.risk === "high" &&
+      !!params &&
+      typeof params.command === "string" &&
+      params.command.trim().length > 0 &&
+      params.command.length <= 2000 &&
+      (params.cwd === undefined || (typeof params.cwd === "string" && params.cwd.length <= 2048)) &&
+      (params.timeoutMs === undefined || (typeof params.timeoutMs === "number" && Number.isInteger(params.timeoutMs)))
+    );
+  }
+
+  if (action.capability === "read_file" || action.capability === "delete_file" || action.capability === "list_directory") {
+    return action.target.trim().length > 0 && action.target.length <= 2048;
+  }
+
+  if (action.capability === "write_file") {
+    const params = action.params;
+    return (
+      action.risk === "high" &&
+      action.target.trim().length > 0 &&
+      action.target.length <= 2048 &&
+      !!params &&
+      typeof params.content === "string" &&
+      params.content.length > 0 &&
+      params.content.length <= 200000 &&
+      (params.overwrite === undefined || typeof params.overwrite === "boolean")
     );
   }
 

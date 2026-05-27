@@ -17,10 +17,6 @@ export function createPermissionService(initialRules: PermissionRule[]) {
   return {
     // 判断某个能力请求当前是否允许执行.
     canExecute(request: CapabilityRequest): CapabilityDecision {
-      if (request.risk === "high") {
-        return { allowed: false, reason: "unsupported_high_risk" };
-      }
-
       if (request.risk === "low" && rules.has(ruleKey(request))) {
         return { allowed: true, reason: "remembered" };
       }

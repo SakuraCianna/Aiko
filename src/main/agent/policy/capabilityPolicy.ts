@@ -27,8 +27,7 @@ export type AikoCapabilityPolicyDecision = {
     | "denied_by_policy"
     | "unknown_capability"
     | "target_denied"
-    | "nested_batch_denied"
-    | "high_risk_denied";
+    | "nested_batch_denied";
 };
 
 const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
@@ -84,13 +83,34 @@ const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
   },
   {
     capability: "read_file",
-    defaultDecision: "deny",
+    defaultDecision: "confirm",
     risk: "high",
     rememberable: false,
     batchAllowed: false
   },
   {
     capability: "write_file",
+    defaultDecision: "confirm",
+    risk: "high",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
+    capability: "delete_file",
+    defaultDecision: "confirm",
+    risk: "high",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
+    capability: "list_directory",
+    defaultDecision: "confirm",
+    risk: "medium",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
+    capability: "capture_screen",
     defaultDecision: "deny",
     risk: "high",
     rememberable: false,
@@ -105,7 +125,7 @@ const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
   },
   {
     capability: "run_shell_command",
-    defaultDecision: "deny",
+    defaultDecision: "confirm",
     risk: "high",
     rememberable: false,
     batchAllowed: false
@@ -147,7 +167,6 @@ export function evaluateCapabilityPolicy(
 function evaluateSingleAction(action: PendingActionDto, policy: AikoCapabilityPolicy): AikoCapabilityPolicyDecision {
   const rule = policy.get(action.capability);
   if (!rule) return denied("unknown_capability");
-  if (action.risk === "high" || rule.risk === "high") return denied("high_risk_denied");
   if (rule.defaultDecision === "deny") return denied("denied_by_policy");
   if (rule.allowedTargets && !rule.allowedTargets.includes(action.target)) return denied("target_denied");
 

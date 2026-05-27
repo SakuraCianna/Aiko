@@ -18,6 +18,8 @@ import {
   type Reminder,
 } from "../reminders/reminderService";
 import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import type { AikoFileSystem } from "../capabilities/aikoFileSystem";
+import { validateShellCommandRequest, type ShellCommandRunner } from "../capabilities/shellCommand";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 
@@ -25,6 +27,8 @@ export type ActionExecutorDeps = {
   openUrl: (url: string) => Promise<void>;
   openApplication: (query: string, expectedPath?: string) => Promise<boolean>;
   writeDesktopMarkdown?: DesktopMarkdownWriter;
+  shellCommandRunner?: ShellCommandRunner;
+  fileSystem?: AikoFileSystem;
   actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
   hooks?: Pick<AikoRuntimeHooks, "emit">;
   now: () => Date;
@@ -98,10 +102,6 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     action: ExecuteActionRequest["action"],
     remember: boolean,
   ): Promise<ExecuteActionResponse> {
-    if (action.risk === "high") {
-      return { ok: false, message: describeActionFailure(action, "high_risk") };
-    }
-
     if (action.capability === "batch_actions") {
       return executeBatchAction(action, remember);
     }
@@ -224,6 +224,52 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       const result = await deps.writeDesktopMarkdown({ title, content });
       rememberSuccessfulPermission(action, remember);
       return { ok: true, message: `我把 Markdown 写好了: ${result.filePath}` };
+    }
+
+    if (action.capability === "run_shell_command") {
+      const command = readStringParam(action.params, "command") || action.target;
+      const cwd = readStringParam(action.params, "cwd") ?? undefined;
+      const timeoutMs = readNumberParam(action.params, "timeoutMs") ?? undefined;
+      const validated = validateShellCommandRequest({ command, cwd, timeoutMs });
+      if (!validated.ok || !deps.shellCommandRunner) {
+        return { ok: false, message: `Shell command blocked: ${validated.ok ? "runner_missing" : validated.reason}` };
+      }
+
+      const result = await deps.shellCommandRunner(validated.request);
+      const output = formatShellCommandOutput(result.stdout, result.stderr);
+      return {
+        ok: result.exitCode === 0 && !result.timedOut,
+        message: `Shell command finished with exit code ${result.exitCode ?? "timeout"}.\n${output}`
+      };
+    }
+
+    if (action.capability === "read_file") {
+      if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const content = await deps.fileSystem.readTextFile(action.target);
+      return { ok: true, message: `File content:\n${content}` };
+    }
+
+    if (action.capability === "write_file") {
+      const content = readStringParam(action.params, "content");
+      const overwrite = readBooleanParam(action.params, "overwrite") ?? false;
+      if (!deps.fileSystem || content === null) {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+      await deps.fileSystem.writeTextFile(action.target, content, { overwrite });
+      return { ok: true, message: `File written: ${action.target}` };
+    }
+
+    if (action.capability === "list_directory") {
+      if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const entries = await deps.fileSystem.listDirectory(action.target);
+      const lines = entries.map((entry) => `${entry.kind}: ${entry.name}`);
+      return { ok: true, message: `Directory entries:\n${lines.join("\n")}` };
+    }
+
+    if (action.capability === "delete_file") {
+      if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const result = await deps.fileSystem.moveToTrash(action.target);
+      return { ok: true, message: `File moved to Aiko trash: ${result.trashPath}` };
     }
 
     return { ok: false, message: describeActionFailure(action, "unsupported") };
@@ -353,4 +399,21 @@ function readStringParam(
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : null;
+}
+
+// 从动作参数中安全读取布尔值.
+function readBooleanParam(
+  params: ExecuteActionRequest["action"]["params"],
+  key: string,
+): boolean | null {
+  const value = params?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+// 整理 Shell 输出, 保留 stdout 和 stderr 方便定位错误.
+function formatShellCommandOutput(stdout: string, stderr: string) {
+  const parts: string[] = [];
+  if (stdout.trim()) parts.push(`stdout:\n${stdout.trim()}`);
+  if (stderr.trim()) parts.push(`stderr:\n${stderr.trim()}`);
+  return parts.length > 0 ? parts.join("\n") : "No output.";
 }

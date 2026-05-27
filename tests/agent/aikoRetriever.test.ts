@@ -72,7 +72,7 @@ describe("createAikoRetriever", () => {
 
     const context = await retriever.retrieve(textPayload("随便聊聊"));
 
-    expect(context.toolHints).toEqual([
+    expect(context.toolHints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: "open_application",
         capability: "open_application",
@@ -98,12 +98,24 @@ describe("createAikoRetriever", () => {
         requiresConfirmation: true
       }),
       expect.objectContaining({
+        name: "run_shell_command",
+        capability: "run_shell_command",
+        risk: "high",
+        requiresConfirmation: true
+      }),
+      expect.objectContaining({
+        name: "read_file",
+        capability: "read_file",
+        risk: "high",
+        requiresConfirmation: true
+      }),
+      expect.objectContaining({
         name: "recall_memory"
       }),
       expect.objectContaining({
         name: "list_reminders"
       })
-    ]);
+    ]));
   });
 
   it("uses active memory selector as the pre-model memory boundary", async () => {

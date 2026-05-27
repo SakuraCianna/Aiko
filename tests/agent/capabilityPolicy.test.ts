@@ -36,14 +36,14 @@ describe("capability policy", () => {
     });
   });
 
-  it("keeps high-risk Windows automation capabilities registered but denied", () => {
+  it("keeps high-risk Windows automation capabilities confirmed and non-rememberable", () => {
     const policy = createDefaultCapabilityPolicy();
 
     expect(policy.list()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ capability: "read_file", risk: "high", defaultDecision: "deny" }),
-      expect.objectContaining({ capability: "write_file", risk: "high", defaultDecision: "deny" }),
-      expect.objectContaining({ capability: "window_control", risk: "high", defaultDecision: "deny" }),
-      expect.objectContaining({ capability: "run_shell_command", risk: "high", defaultDecision: "deny" })
+      expect.objectContaining({ capability: "read_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "write_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "delete_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "run_shell_command", risk: "high", defaultDecision: "confirm", rememberable: false })
     ]));
     expect(
       evaluateCapabilityPolicy(
@@ -57,9 +57,10 @@ describe("capability policy", () => {
         policy
       )
     ).toMatchObject({
-      allowed: false,
-      requiresConfirmation: false,
-      reason: "high_risk_denied"
+      allowed: true,
+      requiresConfirmation: true,
+      rememberable: false,
+      reason: "confirmation_required"
     });
   });
 
