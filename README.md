@@ -344,6 +344,7 @@ src/renderer/components/AgentDebugPanel.tsx
 - 没有 ASR 服务时, Aiko 不会假装听懂语音, 会明确把语音理解失败传进上下文。
 - 回复语音优先走 CosyVoice TTS provider, 前提是 `AIKO_TTS_ENABLED=true` 且本地 TTS 服务已经启动。
 - TTS provider 不可用时, renderer 会回退到浏览器 Web Speech API。
+- 设置面板会检查 `AIKO_ASR_BASE_URL/health` 和 `AIKO_TTS_BASE_URL/health`, 用来显示本地语音服务是否已连接。
 - zero-shot voice cloning 还没有正式接入音色管理和训练流程。
 
 后续推荐顺序:

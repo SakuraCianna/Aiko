@@ -12,6 +12,7 @@ import { openApplication, type ApplicationConfig } from "../capabilities/openApp
 import { openUrl } from "../capabilities/openUrl";
 import { createPowerShellCommandRunner } from "../capabilities/shellCommand";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import type { VoiceHealthService } from "../voice/voiceHealth";
 import type { SpeechSynthesisProvider } from "../voice/voiceTypes";
 import type {
   ApplicationPreferenceRepository,
@@ -43,6 +44,7 @@ export type AikoHandlerDeps = {
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   applicationProvider?: () => ApplicationConfig[];
   speechSynthesisProvider?: SpeechSynthesisProvider;
+  voiceHealthService?: VoiceHealthService;
 };
 
 type PendingActionEntry = {
@@ -171,6 +173,26 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
       speed: request.speed,
       format: "wav"
     });
+  });
+
+  ipcMain.handle("voice:status", async () => {
+    if (!deps.voiceHealthService) {
+      return {
+        asr: {
+          provider: "faster-whisper",
+          status: "disabled",
+          baseUrl: "",
+          message: "voice health service is not configured"
+        },
+        tts: {
+          provider: "cosyvoice",
+          status: "disabled",
+          baseUrl: "",
+          message: "voice health service is not configured"
+        }
+      };
+    }
+    return deps.voiceHealthService.snapshot();
   });
 
   ipcMain.handle("action:execute", async (_event, request: unknown) => {

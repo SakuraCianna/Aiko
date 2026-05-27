@@ -134,6 +134,47 @@ describe("registerAikoHandlers pending action approvals", () => {
       mimeType: "audio/wav"
     });
   });
+
+  it("exposes voice provider status over IPC", async () => {
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications(),
+      voiceHealthService: {
+        async snapshot() {
+          return {
+            asr: {
+              provider: "faster-whisper",
+              status: "ready",
+              baseUrl: "http://127.0.0.1:9001",
+              message: "ready"
+            },
+            tts: {
+              provider: "cosyvoice",
+              status: "disabled",
+              baseUrl: "http://127.0.0.1:9002",
+              message: "disabled"
+            }
+          };
+        }
+      }
+    });
+
+    await expect(callHandler("voice:status")).resolves.toMatchObject({
+      asr: { provider: "faster-whisper", status: "ready" },
+      tts: { provider: "cosyvoice", status: "disabled" }
+    });
+  });
 });
 
 function createRuntime(options: {

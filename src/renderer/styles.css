@@ -358,6 +358,39 @@ button {
   padding: 0 10px;
 }
 
+.voice-status {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-status-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.96);
+  color: #33485b;
+  font-size: 13px;
+}
+
+.voice-status-row span {
+  overflow-wrap: anywhere;
+}
+
+.voice-status-ready {
+  border-color: rgba(74, 148, 108, 0.25);
+  background: rgba(232, 246, 238, 0.94);
+}
+
+.voice-status-unreachable {
+  border-color: rgba(177, 83, 93, 0.25);
+  background: rgba(255, 239, 241, 0.94);
+}
+
 .panel-section {
   display: grid;
   gap: 10px;

@@ -23,6 +23,7 @@ import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
 import { createCosyVoiceSpeechSynthesisProvider } from "./voice/cosyVoiceProvider";
 import { createFasterWhisperSpeechUnderstandingProvider } from "./voice/fasterWhisperProvider";
+import { createVoiceHealthService } from "./voice/voiceHealth";
 import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
@@ -55,6 +56,7 @@ void app.whenReady().then(() => {
   const speechSynthesisProvider = config.voice.tts.enabled
     ? createCosyVoiceSpeechSynthesisProvider(config.voice.tts)
     : undefined;
+  const voiceHealthService = createVoiceHealthService(config);
   stopAgentStatusForwarder = attachAikoAgentStatusForwarder([petWindow, panelWindow], hooks);
   const agentRuntime = createAikoAgentRuntime({
     config,
@@ -84,7 +86,8 @@ void app.whenReady().then(() => {
     permissionRepository,
     reminderRepository,
     applicationPreferenceRepository,
-    speechSynthesisProvider
+    speechSynthesisProvider,
+    voiceHealthService
   });
   stopCommitmentHeartbeat = startCommitmentHeartbeat([petWindow, panelWindow], commitmentService);
 });

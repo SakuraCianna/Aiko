@@ -75,6 +75,18 @@ export type SynthesizeSpeechResponseDto =
       message: string;
     };
 
+export type VoiceProviderStatusDto = {
+  provider: "faster-whisper" | "cosyvoice";
+  status: "disabled" | "ready" | "unreachable";
+  baseUrl: string;
+  message: string;
+};
+
+export type VoiceStatusSnapshotDto = {
+  asr: VoiceProviderStatusDto;
+  tts: VoiceProviderStatusDto;
+};
+
 export type AikoAgentStatusPhase =
   | "accepted"
   | "running"
@@ -243,6 +255,7 @@ export type AikoApi = {
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
   synthesizeSpeech: (request: SynthesizeSpeechRequestDto) => Promise<SynthesizeSpeechResponseDto>;
+  getVoiceStatus: () => Promise<VoiceStatusSnapshotDto>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   onAgentStatus: (listener: (event: AikoAgentStatusEventDto) => void) => () => void;
   onProactiveMessage: (listener: (message: AikoProactiveMessage) => void) => () => void;
