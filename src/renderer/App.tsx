@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatPayload } from "../shared/chatPayload";
 import type { AikoProactiveMessage, PendingActionDto, PanelName } from "../shared/ipcTypes";
 import type { CharacterBehavior, CharacterMotion } from "./character/characterTypes";
+import { ActionAuditPanel } from "./components/ActionAuditPanel";
 import { AgentDebugPanel } from "./components/AgentDebugPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { CommandInput } from "./components/CommandInput";
@@ -347,6 +348,7 @@ export function App() {
               {activePanel === "reminders" && <ReminderPanel onStatus={setMessage} />}
               {activePanel === "memory" && <MemoryPanel onStatus={setMessage} />}
               {activePanel === "agent" && <AgentDebugPanel />}
+              {activePanel === "audit" && <ActionAuditPanel />}
               {activePanel === "settings" && <SettingsPanel />}
             </PanelShell>
           </div>

@@ -11,6 +11,7 @@ const panels: Array<{ id: PanelName; label: string }> = [
   { id: "reminders", label: "提醒" },
   { id: "memory", label: "记忆" },
   { id: "agent", label: "Agent" },
+  { id: "audit", label: "审计" },
   { id: "settings", label: "设置" }
 ];
 

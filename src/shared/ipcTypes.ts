@@ -1,6 +1,6 @@
 import type { ChatPayload } from "./chatPayload";
 
-export type PanelName = "chat" | "reminders" | "memory" | "agent" | "settings";
+export type PanelName = "chat" | "reminders" | "memory" | "agent" | "audit" | "settings";
 
 export type PendingActionApprovalDto = {
   mode: "passive" | "interrupt";

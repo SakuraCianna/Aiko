@@ -252,6 +252,20 @@ button {
   margin: 8px 0;
 }
 
+.safety-panel {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(177, 83, 93, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 247, 248, 0.96);
+}
+
+.rollback-note {
+  color: #49657e;
+  font-size: 13px;
+}
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
@@ -591,6 +605,49 @@ button {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.audit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.audit-log-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-log-entry {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.94);
+}
+
+.audit-log-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.risk-badge {
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(225, 235, 243, 0.9);
+  color: #2e4558;
+  font-size: 12px;
+}
+
+.audit-risk-high .risk-badge {
+  background: rgba(255, 229, 233, 0.96);
+  color: #8d3241;
 }
 
 .agent-debug-card {

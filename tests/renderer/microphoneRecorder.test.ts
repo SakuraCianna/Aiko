@@ -30,6 +30,7 @@ describe("microphoneRecorder", () => {
     expect(commandInput).toContain("toggleVoiceInput");
     expect(commandInput).toContain("toggleAudioAttachmentRecording");
     expect(commandInput).toContain("createWavAudioRecorder");
+    expect(commandInput).toContain("submitPayload(value, [...attachmentsRef.current, attachment])");
     expect(commandInput).not.toContain("createRealtimeSpeechController");
     expect(commandInput).not.toContain("MediaRecorder");
   });

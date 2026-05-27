@@ -1,4 +1,9 @@
 import type { PendingActionChoiceDto, PendingActionDto } from "../../shared/ipcTypes";
+import {
+  describeActionRisk,
+  describeRollbackStrategy,
+  shouldOfferRememberedAuthorization
+} from "../../shared/actionSafety";
 
 type ConfirmDialogProps = {
   action: PendingActionDto | null;
@@ -20,9 +25,9 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!action) return null;
 
-  const riskLabel = action.risk === "low" ? "低" : action.risk === "medium" ? "中" : "高";
   const choices = action.choices ?? [];
   const batchActions = action.actions ?? [];
+  const showRememberButton = shouldOfferRememberedAuthorization(action);
 
   return (
     <div className="dialog-backdrop">
@@ -49,7 +54,11 @@ export function ConfirmDialog({
           </div>
         ) : (
           <>
-            <p>风险:{riskLabel}</p>
+            <div className="safety-panel">
+              <p>{describeActionRisk(action)}</p>
+              <p className="rollback-note">{describeRollbackStrategy(action)}</p>
+              {!showRememberButton && <p>高风险动作每次都要确认, 不会被记住为永久授权.</p>}
+            </div>
             {batchActions.length > 0 && (
               <ol className="batch-action-list">
                 {batchActions.map((batchAction, index) => (
@@ -64,9 +73,11 @@ export function ConfirmDialog({
               <button type="button" onClick={onOnce}>
                 仅这一次
               </button>
-              <button type="button" onClick={onAlways}>
-                以后不再询问
-              </button>
+              {showRememberButton && (
+                <button type="button" onClick={onAlways}>
+                  以后不再询问
+                </button>
+              )}
             </div>
           </>
         )}

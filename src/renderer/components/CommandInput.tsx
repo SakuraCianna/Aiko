@@ -42,9 +42,9 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   }
 
   // 统一提交聊天 payload, 保证语音识别和手动输入使用同一条路径.
-  function submitPayload(text: string) {
+  function submitPayload(text: string, overrideAttachments: ChatAttachment[] = attachmentsRef.current) {
     const trimmed = text.trim();
-    const currentAttachments = attachmentsRef.current;
+    const currentAttachments = overrideAttachments;
     if (!trimmed && currentAttachments.length === 0) return false;
     void onSubmit({ text: trimmed, attachments: currentAttachments });
     setValue("");
@@ -167,7 +167,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
 
     const attachment = await createAudioAttachmentFromBlob(blob);
     if (!mountedRef.current) return;
-    appendAttachments([attachment]);
+    submitPayload(value, [...attachmentsRef.current, attachment]);
   }
 
   // 同步附件状态和附件引用, 避免异步回调使用过期数组.
