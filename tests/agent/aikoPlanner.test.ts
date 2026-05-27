@@ -148,6 +148,27 @@ describe("createAikoPlanner", () => {
     });
   });
 
+  it("plans explicit screen inspection as a critical confirmed action", async () => {
+    const planner = createAikoPlanner();
+
+    const plan = await planner.plan({
+      userText: "打开 Cursor 然后帮我看一下当前桌面",
+      userTranscript: "打开 Cursor 然后帮我看一下当前桌面",
+      toolHints: []
+    });
+
+    expect(plan.steps.map((step) => step.action.capability)).toEqual(["open_application", "capture_screen"]);
+    expect(plan.steps[1]?.action).toMatchObject({
+      title: "截取屏幕:primary_display",
+      capability: "capture_screen",
+      risk: "critical",
+      target: "primary_display",
+      params: {
+        analysisPrompt: "帮我看一下当前桌面"
+      }
+    });
+  });
+
   it("plans explicit directory listing requests as medium-risk confirmed actions", async () => {
     const planner = createAikoPlanner();
 

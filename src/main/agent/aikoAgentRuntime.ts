@@ -280,6 +280,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
           attachmentCount: context.attachmentSummaries.length,
           currentKnowledgeKind: context.currentKnowledge?.kind ?? null
         });
+        await dispatchResearchWorker(context, runId);
         return context;
       },
       async plan(context) {
@@ -665,6 +666,7 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
     actionJournal.recordPlanned({ runId, action: trackedAction, source });
     const threadId = trackedAction.approval?.threadId;
     if (threadId && runId) approvalThreadRuns.set(threadId, runId);
+    await dispatchActionWorker(trackedAction, runId, source);
     await emitPlannedActionHook("after_tool_call", trackedAction, runId, source, true);
     return trackedAction;
   }
@@ -759,10 +761,61 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
   // 内部 worker 是增强链路, 失败不能阻断 Aiko 对用户的主回复.
   async function runWorkerSafely(name: string, input: unknown) {
     try {
-      await workerRegistry.run(name, input);
+      await workerRegistry.run(name, input, { maxAttempts: 2 });
     } catch (error) {
       console.warn("[aiko:worker] worker failed", { name, error: formatAgentErrorForLog(error) });
     }
+  }
+
+  // 检索到网页或实时工具上下文时, 交给 research worker 记录来源和摘要边界.
+  async function dispatchResearchWorker(context: RetrievedContext, runId?: string) {
+    if (!context.webResearch && !context.currentKnowledge) return;
+    await runWorkerSafely("research_worker", {
+      runId,
+      userTranscript: context.userTranscript,
+      hasWebResearch: Boolean(context.webResearch),
+      currentKnowledgeKind: context.currentKnowledge?.kind ?? null,
+      source: context.webResearch?.provider ?? context.currentKnowledge?.source ?? null
+    });
+  }
+
+  // 根据待确认动作类型分派内部 worker, 统一记录复杂任务, 文件写入和长文档输出.
+  async function dispatchActionWorker(action: PendingActionDto, runId: string | undefined, source: string) {
+    const input = summarizeActionForWorker(action, runId, source);
+    if (action.capability === "batch_actions") {
+      await runWorkerSafely("multi_step_worker", input);
+      return;
+    }
+    if (action.capability === "write_desktop_markdown") {
+      await runWorkerSafely("desktop_markdown_worker", input);
+      return;
+    }
+    if (isFileActionCapability(action.capability)) {
+      await runWorkerSafely("file_operation_worker", input);
+    }
+  }
+
+  // 压缩动作给 worker 使用, 避免把长正文或大参数完整写入调度摘要.
+  function summarizeActionForWorker(action: PendingActionDto, runId: string | undefined, source: string) {
+    return {
+      runId,
+      source,
+      capability: action.capability,
+      target: action.target,
+      risk: action.risk,
+      childActionCount: action.actions?.length ?? 0
+    };
+  }
+
+  // 判断动作是否属于本地文件系统能力.
+  function isFileActionCapability(capability: string) {
+    return [
+      "read_file",
+      "write_file",
+      "list_directory",
+      "delete_file",
+      "restore_file_from_trash"
+    ].includes(capability);
   }
 
   // 校验 worker 输入, 防止内部扩展误把未知对象写入记忆或承诺.
@@ -817,6 +870,34 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       description: "Reads planned, approved, and executed local actions.",
       run() {
         return actionJournal.list();
+      }
+    });
+    registry.register({
+      name: "research_worker",
+      description: "Summarizes retrieved web and current-knowledge context before model use.",
+      run(input) {
+        return input;
+      }
+    });
+    registry.register({
+      name: "multi_step_worker",
+      description: "Tracks compound local action plans before user confirmation.",
+      run(input) {
+        return input;
+      }
+    });
+    registry.register({
+      name: "desktop_markdown_worker",
+      description: "Tracks long-form assistant replies that are redirected into Desktop/Aiko markdown.",
+      run(input) {
+        return input;
+      }
+    });
+    registry.register({
+      name: "file_operation_worker",
+      description: "Tracks local file-system action proposals before execution.",
+      run(input) {
+        return input;
       }
     });
   }
@@ -1156,6 +1237,10 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
   const deleteFile = registry.get("delete_file");
   const restoreFileFromTrash = registry.get("restore_file_from_trash");
   const runShellCommand = registry.get("run_shell_command");
+  const captureScreen = registry.get("capture_screen");
+  const windowControl = registry.get("window_control");
+  const keyboardInput = registry.get("keyboard_input");
+  const mouseInput = registry.get("mouse_input");
 
   return [
     // 生成打开应用的待确认动作.
@@ -1442,6 +1527,108 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
           source: z.string().optional().describe("用户原始请求")
         })
       }
+    ),
+    // 生成截屏分析的关键风险待确认动作.
+    tool(
+      ({ target, analysisPrompt, source }) => {
+        proposedActions.push({
+          title: `截取屏幕:${target}`,
+          source: source || target,
+          risk: "critical",
+          capability: "capture_screen",
+          target,
+          params: {
+            ...(analysisPrompt ? { analysisPrompt } : {})
+          }
+        });
+        return "已生成截屏的关键风险待确认动作.";
+      },
+      {
+        name: "propose_capture_screen",
+        description: captureScreen?.description ?? "提出截取当前屏幕的关键风险待确认动作. 只生成动作, 不直接截图.",
+        schema: z.object({
+          target: z.string().min(1).max(180).describe("屏幕目标, 通常使用 primary_display"),
+          analysisPrompt: z.string().min(1).max(1000).optional().describe("截图后希望 Aiko 关注的问题"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成窗口列出或聚焦的关键风险待确认动作.
+    tool(
+      ({ operation, target, source }) => {
+        proposedActions.push({
+          title: operation === "list" ? "列出窗口" : `聚焦窗口:${target}`,
+          source: source || target,
+          risk: "critical",
+          capability: "window_control",
+          target,
+          params: {
+            operation
+          }
+        });
+        return "已生成窗口控制的关键风险待确认动作.";
+      },
+      {
+        name: "propose_window_control",
+        description: windowControl?.description ?? "提出列出或聚焦 Windows 窗口的关键风险待确认动作. 只生成动作, 不直接控制.",
+        schema: z.object({
+          operation: z.enum(["list", "focus"]).describe("窗口操作, list 只列出窗口, focus 只聚焦匹配窗口"),
+          target: z.string().min(1).max(180).describe("list 时使用 list, focus 时使用窗口标题或进程名关键词"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成键盘输入的关键风险待确认动作.
+    tool(
+      ({ keys, source }) => {
+        proposedActions.push({
+          title: "发送键盘输入",
+          source: source || "键盘输入",
+          risk: "critical",
+          capability: "keyboard_input",
+          target: "active_window",
+          params: {
+            keys
+          }
+        });
+        return "已生成键盘输入的关键风险待确认动作.";
+      },
+      {
+        name: "propose_keyboard_input",
+        description: keyboardInput?.description ?? "提出向当前活动窗口发送键盘输入的关键风险待确认动作. 只生成动作, 不直接输入.",
+        schema: z.object({
+          keys: z.string().min(1).max(120).describe("要发送到当前活动窗口的 SendKeys 字符串"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成鼠标移动或点击的关键风险待确认动作.
+    tool(
+      ({ x, y, click, source }) => {
+        proposedActions.push({
+          title: "执行鼠标动作",
+          source: source || "鼠标动作",
+          risk: "critical",
+          capability: "mouse_input",
+          target: "screen",
+          params: {
+            x,
+            y,
+            click: click ?? "none"
+          }
+        });
+        return "已生成鼠标动作的关键风险待确认动作.";
+      },
+      {
+        name: "propose_mouse_input",
+        description: mouseInput?.description ?? "提出移动或点击鼠标的关键风险待确认动作. 只生成动作, 不直接移动鼠标.",
+        schema: z.object({
+          x: z.number().nonnegative().describe("屏幕 X 坐标"),
+          y: z.number().nonnegative().describe("屏幕 Y 坐标"),
+          click: z.enum(["none", "left", "right"]).optional().describe("可选鼠标点击类型"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
     )
   ];
 }
@@ -1532,6 +1719,7 @@ function createBatchAction(message: string, source: string, actions: PendingActi
 
 // 批量动作继承子动作最高风险, 避免把 medium/high 伪装成 low.
 function selectBatchRisk(actions: PendingActionDto[]): PendingActionDto["risk"] {
+  if (actions.some((action) => action.risk === "critical")) return "critical";
   if (actions.some((action) => action.risk === "high")) return "high";
   if (actions.some((action) => action.risk === "medium")) return "medium";
   return "low";

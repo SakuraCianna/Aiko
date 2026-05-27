@@ -11,6 +11,7 @@ import { createAikoFileSystem } from "../capabilities/aikoFileSystem";
 import { openApplication, type ApplicationConfig } from "../capabilities/openApplication";
 import { openUrl } from "../capabilities/openUrl";
 import { createPowerShellCommandRunner } from "../capabilities/shellCommand";
+import { createWindowsAutomation } from "../capabilities/windowsAutomation";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 import type { VoiceHealthService } from "../voice/voiceHealth";
 import type { SpeechStreamingProvider, SpeechSynthesisProvider } from "../voice/voiceTypes";
@@ -21,6 +22,7 @@ import type {
   ReminderRepository
 } from "../database/repositories";
 import { validateChatPayload, type ChatPayload } from "../../shared/chatPayload";
+import { isSafeEditedBatchAction } from "../../shared/editableActionPlan";
 import type {
   CancelActionRequest,
   ChatResponse,
@@ -72,12 +74,14 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
   const writeDesktopMarkdown = createDesktopMarkdownWriter();
   const fileSystem = createAikoFileSystem();
   const shellCommandRunner = createPowerShellCommandRunner();
+  const windowsAutomation = createWindowsAutomation();
   const actionExecutor = createActionExecutor({
     openUrl,
     openApplication: (query, expectedPath) => openApplication(getApplications(), query, expectedPath),
     writeDesktopMarkdown,
     fileSystem,
     shellCommandRunner,
+    windowsAutomation,
     actionJournal: deps.actionJournal,
     hooks: deps.hooks,
     now: () => new Date(),
@@ -204,13 +208,16 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     return deps.voiceHealthService.snapshot();
   });
 
-  ipcMain.handle("voice:stream-start", async (_event, input: unknown): Promise<SpeechStreamStartResponseDto> => {
+  ipcMain.handle("voice:stream-start", async (event, input: unknown): Promise<SpeechStreamStartResponseDto> => {
     const request = parseSpeechStreamStartRequest(input);
     if (!request) return { ok: false, message: "Invalid speech stream start request" };
     if (!deps.speechStreamingProvider) return { ok: false, message: "ASR streaming provider is not configured" };
 
     try {
-      await deps.speechStreamingProvider.start(request);
+      await deps.speechStreamingProvider.start({
+        ...request,
+        onTranscript: (delta) => sendSpeechTranscriptDelta(event.sender, delta)
+      });
       return { ok: true, sessionId: request.sessionId };
     } catch (error) {
       return { ok: false, message: readErrorMessage(error, "Failed to start speech stream") };
@@ -244,8 +251,11 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     try {
       const result = await deps.speechStreamingProvider.finish(request);
       if (result.error) return { ok: false, message: result.error, transcript: result.transcript };
-      sendSpeechTranscriptDelta(event.sender, request.sessionId, {
+      sendSpeechTranscriptDelta(event.sender, {
+        sessionId: request.sessionId,
+        sequence: 0,
         text: result.transcript,
+        isFinal: true,
         confidence: result.confidence,
         language: result.language
       });
@@ -286,14 +296,15 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     pruneExpiredPendingActions();
     const pendingEntry = pendingActions.get(actionId);
     pendingActions.delete(actionId);
-    if (!pendingEntry || !sameAction(pendingEntry.action, request.action)) {
+    const actionToExecute = pendingEntry ? resolveExecutablePendingAction(pendingEntry.action, request.action) : null;
+    if (!pendingEntry || !actionToExecute) {
       return { ok: false, message: "这个操作已过期或被修改,请重新发起." };
     }
 
     discardPendingActionApprovals(removeSiblingPendingActions(pendingActions, pendingEntry.action), {
       preserveThreadId: pendingEntry.action.approval?.threadId
     });
-    return executeApprovedAction(pendingEntry.action, request.remember);
+    return executeApprovedAction(actionToExecute, request.remember);
   });
 
   ipcMain.handle("action:cancel", async (_event, request: unknown) => {
@@ -700,21 +711,17 @@ function sendStreamDelta(sender: WebContents, requestId: string, text: string) {
 }
 
 // 发送语音转写结果, 真实 WebSocket provider 后续可以复用这个通道发送 partial.
-function sendSpeechTranscriptDelta(
-  sender: WebContents,
-  sessionId: string,
-  result: { text: string; confidence?: number; language?: string }
-) {
+function sendSpeechTranscriptDelta(sender: WebContents, delta: {
+  sessionId: string;
+  sequence: number;
+  text: string;
+  isFinal: boolean;
+  confidence?: number;
+  language?: string;
+}) {
   if (sender.isDestroyed()) return;
   try {
-    sender.send("voice:transcript-delta", {
-      sessionId,
-      sequence: 0,
-      text: result.text,
-      isFinal: true,
-      confidence: result.confidence,
-      language: result.language
-    });
+    sender.send("voice:transcript-delta", delta);
   } catch {
     return;
   }
@@ -727,7 +734,7 @@ function readErrorMessage(error: unknown, fallback: string): string {
 
 // 判断传入值是否是受支持的面板名称.
 function isPanelName(value: unknown): value is PanelName {
-  return value === "chat" || value === "reminders" || value === "memory" || value === "agent" || value === "settings";
+  return value === "chat" || value === "reminders" || value === "memory" || value === "agent" || value === "audit" || value === "settings";
 }
 
 // 校验执行动作请求的基本结构和动作内容.
@@ -755,7 +762,8 @@ function isPendingActionRequestAction(action: unknown, depth = 0): action is Pen
     typeof (action as PendingActionDto).source === "string" &&
     ((action as PendingActionDto).risk === "low" ||
       (action as PendingActionDto).risk === "medium" ||
-      (action as PendingActionDto).risk === "high") &&
+      (action as PendingActionDto).risk === "high" ||
+      (action as PendingActionDto).risk === "critical") &&
     typeof (action as PendingActionDto).capability === "string" &&
     typeof (action as PendingActionDto).target === "string"
   ) {
@@ -898,6 +906,55 @@ function isSupportedAction(action: PendingActionDto, depth = 0): boolean {
     );
   }
 
+  if (action.capability === "capture_screen") {
+    const analysisPrompt = action.params?.analysisPrompt;
+    return (
+      action.risk === "critical" &&
+      action.target.trim().length > 0 &&
+      action.target.length <= 180 &&
+      (analysisPrompt === undefined || (typeof analysisPrompt === "string" && analysisPrompt.length <= 1000))
+    );
+  }
+
+  if (action.capability === "window_control") {
+    const operation = action.params?.operation;
+    return (
+      action.risk === "critical" &&
+      (operation === "list" || operation === "focus") &&
+      action.target.trim().length > 0 &&
+      action.target.length <= 180
+    );
+  }
+
+  if (action.capability === "keyboard_input") {
+    const keys = action.params?.keys;
+    return (
+      action.risk === "critical" &&
+      action.target === "active_window" &&
+      typeof keys === "string" &&
+      keys.trim().length > 0 &&
+      keys.length <= 120 &&
+      !/[\r\n]/u.test(keys)
+    );
+  }
+
+  if (action.capability === "mouse_input") {
+    const params = action.params;
+    const click = params?.click;
+    return (
+      action.risk === "critical" &&
+      action.target === "screen" &&
+      !!params &&
+      typeof params.x === "number" &&
+      Number.isFinite(params.x) &&
+      params.x >= 0 &&
+      typeof params.y === "number" &&
+      Number.isFinite(params.y) &&
+      params.y >= 0 &&
+      (click === undefined || click === "none" || click === "left" || click === "right")
+    );
+  }
+
   return false;
 }
 
@@ -927,4 +984,11 @@ function sameAction(left: PendingActionDto, right: PendingActionDto): boolean {
     JSON.stringify(left.approval ?? {}) === JSON.stringify(right.approval ?? {}) &&
     JSON.stringify(left.actions ?? []) === JSON.stringify(right.actions ?? [])
   );
+}
+
+// 执行前解析用户编辑后的计划, 只允许批量计划删减步骤, 不允许修改动作细节.
+function resolveExecutablePendingAction(original: PendingActionDto, requested: PendingActionDto): PendingActionDto | null {
+  if (sameAction(original, requested)) return original;
+  if (isSafeEditedBatchAction(original, requested)) return requested;
+  return null;
 }

@@ -21,6 +21,8 @@ describe("createTencentCloudSpeechUnderstandingProvider", () => {
     const provider = createTencentCloudSpeechUnderstandingProvider(
       {
         enabled: true,
+        realtimeEnabled: false,
+        appId: "",
         provider: "tencent-cloud",
         secretId: "akid-test",
         secretKey: "secret-test",

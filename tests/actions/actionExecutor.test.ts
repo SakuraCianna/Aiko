@@ -303,6 +303,98 @@ describe("createActionExecutor", () => {
     expect(executor.listRememberedActions()).toEqual([]);
   });
 
+  it("runs critical Windows automation through the injected automation backend", async () => {
+    const calls: string[] = [];
+    const executor = createActionExecutor({
+      openUrl: async () => undefined,
+      openApplication: async () => false,
+      windowsAutomation: {
+        captureScreen: async (input) => {
+          calls.push(`capture:${input.target}`);
+          return { filePath: "C:\\Users\\Sakura\\Desktop\\Aiko\\screenshots\\screen.png", summary: "captured" };
+        },
+        listWindows: async () => {
+          calls.push("list-windows");
+          return [{ processId: 100, processName: "Code", title: "Aiko - Cursor" }];
+        },
+        focusWindow: async (query) => {
+          calls.push(`focus:${query}`);
+          return { focused: true, title: "Aiko - Cursor" };
+        },
+        sendKeys: async (input) => {
+          calls.push(`keys:${input.keys}`);
+        },
+        moveMouse: async (input) => {
+          calls.push(`mouse:${input.x},${input.y},${input.click ?? "none"}`);
+        }
+      },
+      now: () => new Date("2026-05-19T10:00:00.000Z")
+    });
+
+    const screenshot = await executor.execute({
+      action: {
+        title: "Capture screen",
+        source: "test",
+        risk: "critical",
+        capability: "capture_screen",
+        target: "primary_display"
+      },
+      remember: true
+    });
+    const windowList = await executor.execute({
+      action: {
+        title: "List windows",
+        source: "test",
+        risk: "critical",
+        capability: "window_control",
+        target: "list",
+        params: { operation: "list" }
+      },
+      remember: true
+    });
+    const focus = await executor.execute({
+      action: {
+        title: "Focus window",
+        source: "test",
+        risk: "critical",
+        capability: "window_control",
+        target: "Cursor",
+        params: { operation: "focus" }
+      },
+      remember: true
+    });
+    const keys = await executor.execute({
+      action: {
+        title: "Send keys",
+        source: "test",
+        risk: "critical",
+        capability: "keyboard_input",
+        target: "active_window",
+        params: { keys: "hello" }
+      },
+      remember: true
+    });
+    const mouse = await executor.execute({
+      action: {
+        title: "Move mouse",
+        source: "test",
+        risk: "critical",
+        capability: "mouse_input",
+        target: "screen",
+        params: { x: 10, y: 20, click: "left" }
+      },
+      remember: true
+    });
+
+    expect(screenshot.message).toContain("screen.png");
+    expect(windowList.message).toContain("Aiko - Cursor");
+    expect(focus.message).toContain("Aiko - Cursor");
+    expect(keys.ok).toBe(true);
+    expect(mouse.ok).toBe(true);
+    expect(calls).toEqual(["capture:primary_display", "list-windows", "focus:Cursor", "keys:hello", "mouse:10,20,left"]);
+    expect(executor.listRememberedActions()).toEqual([]);
+  });
+
   it("rejects dangerous shell commands before invoking the runner", async () => {
     let invoked = false;
     const executor = createActionExecutor({

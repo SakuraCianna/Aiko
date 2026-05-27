@@ -1,4 +1,5 @@
 import type { ChatAttachment } from "../../shared/chatPayload";
+import type { SpeechTranscriptDelta } from "../../shared/ipcTypes";
 
 export type VoiceEmotion = "neutral" | "happy" | "serious" | "comfort" | "notice";
 
@@ -70,6 +71,7 @@ export type SpeechStreamStartInput = {
   sessionId: string;
   sampleRate: number;
   frameMs: number;
+  onTranscript?: (delta: SpeechTranscriptDelta) => void;
 };
 
 export type SpeechStreamChunkInput = {

@@ -25,6 +25,8 @@ describe("parseEnv", () => {
     expect(config.voice).toEqual({
       asr: {
         enabled: false,
+        realtimeEnabled: false,
+        appId: "",
         provider: "tencent-cloud",
         secretId: "",
         secretKey: "",
@@ -157,6 +159,8 @@ describe("parseEnv", () => {
       GLM_MODEL: "glm-4.6v-flash",
       GLM_API_KEY: "secret-value",
       AIKO_ASR_ENABLED: "true",
+      AIKO_ASR_REALTIME_ENABLED: "true",
+      TENCENTCLOUD_APP_ID: "1250000000",
       TENCENTCLOUD_SECRET_ID: "akid-test",
       TENCENTCLOUD_SECRET_KEY: "secret-test",
       TENCENTCLOUD_REGION: "ap-guangzhou",
@@ -174,6 +178,8 @@ describe("parseEnv", () => {
 
     expect(config.voice.asr).toEqual({
       enabled: true,
+      realtimeEnabled: true,
+      appId: "1250000000",
       provider: "tencent-cloud",
       secretId: "akid-test",
       secretKey: "secret-test",
@@ -206,6 +212,20 @@ describe("parseEnv", () => {
         AIKO_ASR_ENABLED: "true"
       })
     ).toThrow("Missing required environment variable: TENCENTCLOUD_SECRET_ID or TENCENTCLOUD_SECRET_KEY");
+  });
+
+  it("requires Tencent Cloud AppId only when realtime ASR is enabled", () => {
+    expect(() =>
+      parseEnv({
+        GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
+        GLM_MODEL: "glm-4.6v-flash",
+        GLM_API_KEY: "secret-value",
+        AIKO_ASR_ENABLED: "true",
+        AIKO_ASR_REALTIME_ENABLED: "true",
+        TENCENTCLOUD_SECRET_ID: "akid-test",
+        TENCENTCLOUD_SECRET_KEY: "secret-test"
+      })
+    ).toThrow("Missing required environment variable: TENCENTCLOUD_APP_ID");
   });
 
   it("parses companion heartbeat config for proactive desktop-pet presence", () => {

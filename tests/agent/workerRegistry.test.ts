@@ -57,4 +57,29 @@ describe("createAikoWorkerRegistry", () => {
       }
     ]);
   });
+
+  it("retries transient worker failures and records attempt count", async () => {
+    const registry = createAikoWorkerRegistry();
+    let attempts = 0;
+    registry.register({
+      name: "retry_worker",
+      description: "Retries transient failures.",
+      async run() {
+        attempts += 1;
+        if (attempts < 3) throw new Error(`temporary-${attempts}`);
+        return { ok: true };
+      }
+    });
+
+    await expect(registry.run("retry_worker", { retry: true }, { maxAttempts: 3 })).resolves.toEqual({ ok: true });
+    expect(attempts).toBe(3);
+    expect(registry.listRuns()).toMatchObject([
+      {
+        workerName: "retry_worker",
+        status: "completed",
+        attempts: 3,
+        outputSummary: expect.stringContaining("true")
+      }
+    ]);
+  });
 });

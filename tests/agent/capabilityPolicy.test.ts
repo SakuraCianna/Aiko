@@ -46,6 +46,39 @@ describe("capability policy", () => {
       expect.objectContaining({ capability: "restore_file_from_trash", risk: "high", defaultDecision: "confirm", rememberable: false }),
       expect.objectContaining({ capability: "run_shell_command", risk: "high", defaultDecision: "confirm", rememberable: false })
     ]));
+  });
+
+  it("keeps critical Windows automation capabilities confirmed and never rememberable", () => {
+    const policy = createDefaultCapabilityPolicy();
+
+    expect(policy.list()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capability: "capture_screen", risk: "critical", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "window_control", risk: "critical", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "keyboard_input", risk: "critical", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "mouse_input", risk: "critical", defaultDecision: "confirm", rememberable: false })
+    ]));
+    expect(
+      evaluateCapabilityPolicy(
+        {
+          title: "Capture screen",
+          source: "inspect desktop",
+          risk: "critical",
+          capability: "capture_screen",
+          target: "primary_display"
+        },
+        policy
+      )
+    ).toMatchObject({
+      allowed: true,
+      requiresConfirmation: true,
+      rememberable: false,
+      reason: "confirmation_required"
+    });
+  });
+
+  it("rejects model-supplied actions that understate their policy risk", () => {
+    const policy = createDefaultCapabilityPolicy();
+
     expect(
       evaluateCapabilityPolicy(
         {
@@ -58,10 +91,25 @@ describe("capability policy", () => {
         policy
       )
     ).toMatchObject({
-      allowed: true,
-      requiresConfirmation: true,
+      allowed: false,
+      requiresConfirmation: false,
       rememberable: false,
-      reason: "confirmation_required"
+      reason: "risk_mismatch"
+    });
+    expect(
+      evaluateCapabilityPolicy(
+        {
+          title: "Keyboard input",
+          source: "type password",
+          risk: "low",
+          capability: "keyboard_input",
+          target: "active_window"
+        },
+        policy
+      )
+    ).toMatchObject({
+      allowed: false,
+      reason: "risk_mismatch"
     });
   });
 

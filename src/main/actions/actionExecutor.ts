@@ -20,6 +20,7 @@ import {
 import type { DesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
 import type { AikoFileSystem } from "../capabilities/aikoFileSystem";
 import { validateShellCommandRequest, type ShellCommandRunner } from "../capabilities/shellCommand";
+import type { WindowsAutomation } from "../capabilities/windowsAutomation";
 import type { AikoActionJournal } from "../agent/runtime/actionJournal";
 import type { AikoRuntimeHooks } from "../agent/runtime/runtimeHooks";
 
@@ -28,6 +29,7 @@ export type ActionExecutorDeps = {
   openApplication: (query: string, expectedPath?: string) => Promise<boolean>;
   writeDesktopMarkdown?: DesktopMarkdownWriter;
   shellCommandRunner?: ShellCommandRunner;
+  windowsAutomation?: WindowsAutomation;
   fileSystem?: AikoFileSystem;
   actionJournal?: Pick<AikoActionJournal, "recordExecutionResult">;
   hooks?: Pick<AikoRuntimeHooks, "emit">;
@@ -243,6 +245,53 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       };
     }
 
+    if (action.capability === "capture_screen") {
+      if (!deps.windowsAutomation) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const result = await deps.windowsAutomation.captureScreen({
+        target: action.target,
+        analysisPrompt: readStringParam(action.params, "analysisPrompt") ?? undefined
+      });
+      return {
+        ok: true,
+        message: `Screen captured: ${result.filePath}${result.summary ? `\n${result.summary}` : ""}`
+      };
+    }
+
+    if (action.capability === "window_control") {
+      if (!deps.windowsAutomation) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const operation = readStringParam(action.params, "operation") || "list";
+      if (operation === "list") {
+        const windows = await deps.windowsAutomation.listWindows();
+        const lines = windows.map((item) => `${item.processName}(${item.processId}): ${item.title}`);
+        return { ok: true, message: `Open windows:\n${lines.join("\n") || "No visible windows."}` };
+      }
+      if (operation === "focus") {
+        const result = await deps.windowsAutomation.focusWindow(action.target);
+        return result.focused
+          ? { ok: true, message: `Window focused: ${result.title ?? action.target}` }
+          : { ok: false, message: `Window not found: ${action.target}` };
+      }
+      return { ok: false, message: describeActionFailure(action, "invalid") };
+    }
+
+    if (action.capability === "keyboard_input") {
+      const keys = readStringParam(action.params, "keys");
+      if (!deps.windowsAutomation || !keys) return { ok: false, message: describeActionFailure(action, "invalid") };
+      await deps.windowsAutomation.sendKeys({ keys });
+      return { ok: true, message: "Keyboard input sent to the active window." };
+    }
+
+    if (action.capability === "mouse_input") {
+      const x = readNumberParam(action.params, "x");
+      const y = readNumberParam(action.params, "y");
+      const click = readStringParam(action.params, "click");
+      if (!deps.windowsAutomation || x === null || y === null || (click !== null && click !== "none" && click !== "left" && click !== "right")) {
+        return { ok: false, message: describeActionFailure(action, "invalid") };
+      }
+      await deps.windowsAutomation.moveMouse({ x, y, click: (click ?? "none") as "none" | "left" | "right" });
+      return { ok: true, message: `Mouse moved to ${x}, ${y}${click && click !== "none" ? ` and ${click} clicked` : ""}.` };
+    }
+
     if (action.capability === "read_file") {
       if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
       const content = await deps.fileSystem.readTextFile(action.target);
@@ -289,7 +338,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
     remember: boolean,
   ): Promise<ExecuteActionResponse> {
     const actions = action.actions ?? [];
-    if (actions.length === 0 || actions.some((child) => child.risk === "high" || child.capability === "batch_actions")) {
+    if (actions.length === 0 || actions.some((child) => child.risk === "high" || child.risk === "critical" || child.capability === "batch_actions")) {
       return { ok: false, message: describeActionFailure(action, "invalid") };
     }
 

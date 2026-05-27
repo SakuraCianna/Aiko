@@ -13,11 +13,16 @@ export type AikoWorkerRunRecord = {
   id: string;
   workerName: string;
   status: "running" | "completed" | "failed";
+  attempts: number;
   inputSummary: string;
   outputSummary?: string;
   error?: string;
   startedAt: string;
   endedAt?: string;
+};
+
+export type AikoWorkerRunOptions = {
+  maxAttempts?: number;
 };
 
 export type AikoWorkerRegistry = ReturnType<typeof createAikoWorkerRegistry>;
@@ -41,25 +46,33 @@ export function createAikoWorkerRegistry() {
     },
 
     // 运行指定 worker, 并记录调度结果用于调试和产品化任务展示.
-    async run(name: string, input: unknown) {
+    async run(name: string, input: unknown, options: AikoWorkerRunOptions = {}) {
       const worker = workers.get(name);
       if (!worker) throw new Error(`Unknown Aiko worker: ${name}`);
       const run = createWorkerRunRecord(name, input);
       runs.push(run);
       trimWorkerRuns(runs);
+      const maxAttempts = normalizeMaxAttempts(options.maxAttempts);
 
-      try {
-        const output = await worker.run(input);
-        run.status = "completed";
-        run.outputSummary = summarizeWorkerPayload(output);
-        run.endedAt = new Date().toISOString();
-        return output;
-      } catch (error) {
-        run.status = "failed";
-        run.error = error instanceof Error ? error.message : String(error);
-        run.endedAt = new Date().toISOString();
-        throw error;
+      let lastError: unknown = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        run.attempts = attempt;
+        try {
+          const output = await worker.run(input);
+          run.status = "completed";
+          run.outputSummary = summarizeWorkerPayload(output);
+          run.error = undefined;
+          run.endedAt = new Date().toISOString();
+          return output;
+        } catch (error) {
+          lastError = error;
+          run.error = error instanceof Error ? error.message : String(error);
+        }
       }
+
+      run.status = "failed";
+      run.endedAt = new Date().toISOString();
+      throw lastError;
     },
 
     // 列出最近的 worker 调度记录.
@@ -75,9 +88,16 @@ function createWorkerRunRecord(workerName: string, input: unknown): AikoWorkerRu
     id: `worker_run_${crypto.randomUUID()}`,
     workerName,
     status: "running",
+    attempts: 0,
     inputSummary: summarizeWorkerPayload(input),
     startedAt: new Date().toISOString()
   };
+}
+
+// 规整 worker 重试次数, 防止内部调用者把重试放大成后台风暴.
+function normalizeMaxAttempts(value: number | undefined) {
+  if (!Number.isInteger(value) || !value || value < 1) return 1;
+  return Math.min(value, 3);
 }
 
 // 把 worker 输入输出压缩成短摘要.

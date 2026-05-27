@@ -27,7 +27,8 @@ export type AikoCapabilityPolicyDecision = {
     | "denied_by_policy"
     | "unknown_capability"
     | "target_denied"
-    | "nested_batch_denied";
+    | "nested_batch_denied"
+    | "risk_mismatch";
 };
 
 const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
@@ -118,15 +119,29 @@ const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
   },
   {
     capability: "capture_screen",
-    defaultDecision: "deny",
-    risk: "high",
+    defaultDecision: "confirm",
+    risk: "critical",
     rememberable: false,
     batchAllowed: false
   },
   {
     capability: "window_control",
-    defaultDecision: "deny",
-    risk: "high",
+    defaultDecision: "confirm",
+    risk: "critical",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
+    capability: "keyboard_input",
+    defaultDecision: "confirm",
+    risk: "critical",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
+    capability: "mouse_input",
+    defaultDecision: "confirm",
+    risk: "critical",
     rememberable: false,
     batchAllowed: false
   },
@@ -174,6 +189,7 @@ export function evaluateCapabilityPolicy(
 function evaluateSingleAction(action: PendingActionDto, policy: AikoCapabilityPolicy): AikoCapabilityPolicyDecision {
   const rule = policy.get(action.capability);
   if (!rule) return denied("unknown_capability");
+  if (isRiskUnderstated(action.risk, rule.risk)) return denied("risk_mismatch");
   if (rule.defaultDecision === "deny") return denied("denied_by_policy");
   if (rule.allowedTargets && !rule.allowedTargets.includes(action.target)) return denied("target_denied");
 
@@ -205,6 +221,19 @@ function evaluateBatchPolicy(action: PendingActionDto, policy: AikoCapabilityPol
     rememberable: false,
     reason: "confirmation_required"
   };
+}
+
+// 禁止模型把高风险或关键风险能力伪装成低风险动作.
+function isRiskUnderstated(actionRisk: PendingActionDto["risk"], policyRisk: PendingActionDto["risk"]) {
+  return riskRank(actionRisk) < riskRank(policyRisk);
+}
+
+// 风险等级排序, 用于比较动作声明风险和策略矩阵风险.
+function riskRank(risk: PendingActionDto["risk"]) {
+  if (risk === "critical") return 3;
+  if (risk === "high") return 2;
+  if (risk === "medium") return 1;
+  return 0;
 }
 
 // 生成统一的拒绝结果.

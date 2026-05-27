@@ -65,6 +65,8 @@ function baseConfig(options: { asrEnabled?: boolean; ttsEnabled?: boolean; empty
     voice: {
       asr: {
         enabled: options.asrEnabled ?? false,
+        realtimeEnabled: false,
+        appId: "",
         provider: "tencent-cloud",
         secretId,
         secretKey,

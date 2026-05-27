@@ -14,9 +14,11 @@ import {
   createRestoreActionFromAuditEntry,
   extractAuditArtifacts,
   filterAuditEntries,
+  filterRestoreHistory,
   type RestoreHistoryItem,
   type AuditResultFilter,
-  type AuditRiskFilter
+  type AuditRiskFilter,
+  type RestoreStatusFilter
 } from "./actionAuditHelpers";
 
 type ActionAuditPanelProps = {
@@ -31,6 +33,8 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
   const [capabilityFilter, setCapabilityFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState<AuditResultFilter>("all");
   const [searchText, setSearchText] = useState("");
+  const [restoreStatusFilter, setRestoreStatusFilter] = useState<RestoreStatusFilter>("all");
+  const [restoreSearchText, setRestoreSearchText] = useState("");
   const mountedRef = useRef(true);
   const refreshSeqRef = useRef(0);
 
@@ -47,7 +51,14 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
     () => Array.from(new Set(snapshot.actionJournal.map((entry) => entry.capability))).sort(),
     [snapshot.actionJournal]
   );
-  const restoreHistory = useMemo(() => buildRestoreHistory(snapshot.actionJournal).slice(0, 8), [snapshot.actionJournal]);
+  const restoreHistory = useMemo(
+    () =>
+      filterRestoreHistory(buildRestoreHistory(snapshot.actionJournal), {
+        status: restoreStatusFilter,
+        searchText: restoreSearchText
+      }).slice(0, 8),
+    [restoreSearchText, restoreStatusFilter, snapshot.actionJournal]
+  );
   const filteredEntries = useMemo(
     () =>
       filterAuditEntries(snapshot.actionJournal, {
@@ -105,6 +116,29 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
             <h3>恢复历史</h3>
             <span>{restoreHistory.length}</span>
           </div>
+          <div className="audit-filter-bar audit-restore-filter-bar">
+            <label>
+              状态
+              <select
+                aria-label="恢复状态筛选"
+                value={restoreStatusFilter}
+                onChange={(event) => setRestoreStatusFilter(event.currentTarget.value as RestoreStatusFilter)}
+              >
+                <option value="all">全部</option>
+                <option value="in_trash">待恢复</option>
+                <option value="restored">已恢复</option>
+              </select>
+            </label>
+            <label>
+              文件
+              <input
+                aria-label="恢复历史搜索"
+                value={restoreSearchText}
+                onChange={(event) => setRestoreSearchText(event.currentTarget.value)}
+                placeholder="文件名或路径..."
+              />
+            </label>
+          </div>
           <ol className="audit-restore-list">
             {restoreHistory.map((item) => (
               <RestoreHistoryEntry key={item.id} item={item} onProposeAction={onProposeAction} />
@@ -129,6 +163,7 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
               <option value="low">低风险</option>
               <option value="medium">中风险</option>
               <option value="high">高风险</option>
+              <option value="critical">关键风险</option>
             </select>
           </label>
           <label>

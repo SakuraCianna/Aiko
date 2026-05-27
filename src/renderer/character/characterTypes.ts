@@ -36,7 +36,11 @@ export type CharacterMotion =
   | "interrupt"
   | "dragHold"
   | "errorRecover"
-  | "emphasis";
+  | "emphasis"
+  | "idleShift"
+  | "wait"
+  | "focus"
+  | "relief";
 
 export type CharacterBehavior =
   | "idle"
@@ -53,7 +57,8 @@ export type CharacterBehavior =
   | "curious"
   | "presenting"
   | "shy"
-  | "recovering";
+  | "recovering"
+  | "waiting";
 
 export type CharacterRendererConfig = {
   vrmPath: string;

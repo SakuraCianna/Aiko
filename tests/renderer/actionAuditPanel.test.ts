@@ -6,7 +6,8 @@ import {
   extractAuditArtifacts,
   extractShellCommandOutput,
   extractTrashPathFromAuditMessage,
-  filterAuditEntries
+  filterAuditEntries,
+  filterRestoreHistory
 } from "../../src/renderer/components/actionAuditHelpers";
 import type { AikoActionJournalEntryDto } from "../../src/shared/ipcTypes";
 
@@ -41,6 +42,8 @@ describe("ActionAuditPanel", () => {
     expect(panel).toContain("capabilityFilter");
     expect(panel).toContain("resultFilter");
     expect(panel).toContain("searchText");
+    expect(panel).toContain("restoreStatusFilter");
+    expect(panel).toContain("restoreSearchText");
     expect(panel).toContain("准备恢复");
     expect(panel).toContain("恢复历史");
     expect(readFileSync("src/renderer/components/actionAuditHelpers.ts", "utf8")).toContain("restore_file_from_trash");
@@ -236,6 +239,29 @@ describe("ActionAuditPanel", () => {
         }
       }
     ]);
+  });
+
+  it("filters restore history by file name and restore status", () => {
+    const items = [
+      {
+        id: "old",
+        originalPath: "C:\\Users\\Sakura\\Desktop\\old.md",
+        trashPath: "C:\\Aiko\\.trash\\old.md",
+        deletedAt: "2026-05-27T09:00:00.000Z",
+        status: "in_trash" as const
+      },
+      {
+        id: "done",
+        originalPath: "C:\\Users\\Sakura\\Desktop\\done.md",
+        trashPath: "C:\\Aiko\\.trash\\done.md",
+        restoredPath: "C:\\Users\\Sakura\\Desktop\\done.md",
+        restoredAt: "2026-05-27T09:15:00.000Z",
+        status: "restored" as const
+      }
+    ];
+
+    expect(filterRestoreHistory(items, { status: "in_trash", searchText: "" }).map((item) => item.id)).toEqual(["old"]);
+    expect(filterRestoreHistory(items, { status: "all", searchText: "done.md" }).map((item) => item.id)).toEqual(["done"]);
   });
 });
 

@@ -1,4 +1,4 @@
-export type RiskLevel = "low" | "medium" | "high";
+export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export type CapabilityRequest = {
   capability: string;

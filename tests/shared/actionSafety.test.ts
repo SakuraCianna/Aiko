@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildActionImpactPreview,
+  classifyRecoveryStrategy,
   describeActionImpact,
   describeActionRisk,
   describeRollbackStrategy,
@@ -13,7 +15,34 @@ describe("actionSafety", () => {
 
     expect(describeActionRisk(action)).toContain("高风险");
     expect(describeRollbackStrategy(action)).toContain("Shell");
+    expect(classifyRecoveryStrategy(action)).toEqual({
+      level: "manual_review",
+      label: "需要人工复核",
+      message: "Shell 命令只允许只读 allowlist, 但执行结果无法自动撤销, 需要根据 stdout, stderr 和 exit code 人工复核."
+    });
     expect(shouldOfferRememberedAuthorization(action)).toBe(false);
+  });
+
+  it("describes critical Windows automation with a stronger confirmation boundary", () => {
+    const action = actionDto("keyboard_input", "active_window", "critical");
+
+    expect(describeActionRisk(action)).toContain("关键风险");
+    expect(shouldOfferRememberedAuthorization(action)).toBe(false);
+    expect(describeActionImpact(action)).toEqual([
+      "将向当前活动窗口发送键盘输入: active_window.",
+      "这类动作可能影响任何当前聚焦的软件, 每次都必须单独确认."
+    ]);
+    expect(buildActionImpactPreview(action)).toEqual({
+      title: "执行前影响预览",
+      riskLabel: "关键风险",
+      capability: "keyboard_input",
+      target: "active_window",
+      lines: [
+        "将向当前活动窗口发送键盘输入: active_window.",
+        "这类动作可能影响任何当前聚焦的软件, 每次都必须单独确认.",
+        "恢复能力: 无法自动撤销."
+      ]
+    });
   });
 
   it("describes capability-specific impact before high-risk actions run", () => {

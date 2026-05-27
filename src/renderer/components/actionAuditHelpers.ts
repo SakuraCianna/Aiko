@@ -35,6 +35,13 @@ export type RestoreHistoryItem = {
   restoreAction?: PendingActionDto;
 };
 
+export type RestoreStatusFilter = "all" | RestoreHistoryItem["status"];
+
+export type RestoreHistoryFilter = {
+  status: RestoreStatusFilter;
+  searchText: string;
+};
+
 // 按当前筛选条件过滤审计日志, 供 UI 和测试共用.
 export function filterAuditEntries(entries: AikoActionJournalEntryDto[], filters: AuditEntryFilter) {
   const search = filters.searchText.trim().toLowerCase();
@@ -44,6 +51,20 @@ export function filterAuditEntries(entries: AikoActionJournalEntryDto[], filters
     if (!matchesResultFilter(entry, filters.result)) return false;
     if (!search) return true;
     return createSearchHaystack(entry).includes(search);
+  });
+}
+
+// 按状态和路径关键词过滤恢复历史.
+export function filterRestoreHistory(items: RestoreHistoryItem[], filters: RestoreHistoryFilter) {
+  const search = filters.searchText.trim().toLowerCase();
+  return items.filter((item) => {
+    if (filters.status !== "all" && item.status !== filters.status) return false;
+    if (!search) return true;
+    return [item.originalPath, item.trashPath, item.restoredPath, item.status]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase()
+      .includes(search);
   });
 }
 

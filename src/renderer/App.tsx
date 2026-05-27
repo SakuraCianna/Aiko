@@ -19,7 +19,9 @@ import { selectAgentStatusCue } from "./character/agentStatusMotion";
 import {
   selectActionResultCue,
   selectCancelMotion,
+  selectIdleAmbientMotion,
   selectInitialCharacterCue,
+  selectInterruptionCue,
   selectSpeechMotion
 } from "./character/motionCues";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
@@ -29,6 +31,9 @@ import {
   reduceTaskCardFromAgentStatus,
   type AikoTaskCard
 } from "./task/taskStatusModel";
+
+const AMBIENT_MOTION_MIN_DELAY_MS = 14000;
+const AMBIENT_MOTION_RANDOM_DELAY_MS = 9000;
 
 // 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
 export function App() {
@@ -44,6 +49,7 @@ export function App() {
   const speechControllerRef = useRef<AikoSpeechController | null>(null);
   const hideControlsTimerRef = useRef<number | null>(null);
   const characterIdleTimerRef = useRef<number | null>(null);
+  const ambientMotionTimerRef = useRef<number | null>(null);
   const hideTaskCardTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const streamMotionPlayedRef = useRef(false);
@@ -73,10 +79,16 @@ export function App() {
       speechControllerRef.current = null;
       clearHideControlsTimer();
       clearCharacterIdleTimer();
+      clearAmbientMotionTimer();
       clearHideTaskCardTimer();
       activeStreamIdRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    scheduleAmbientMotion();
+    return clearAmbientMotionTimer;
+  }, [characterBehavior, pendingAction]);
 
   useEffect(() => {
     clearHideTaskCardTimer();
@@ -145,7 +157,7 @@ export function App() {
       setMessage(response.message);
       showControls();
       if (response.pendingAction) {
-        speakAiko(response.message, "confirming", "speaking", "notice");
+        speakAiko(response.message, "waiting", "speaking", "wait");
         setPendingAction({
           id: response.pendingAction.id,
           title: response.pendingAction.title,
@@ -185,9 +197,10 @@ export function App() {
     if (requestId) {
       void window.aiko.cancelStream(requestId);
       const cancelMessage = "已中止. 我先停下.";
+      const cue = selectInterruptionCue("cancelled");
       setMessage(cancelMessage);
-      setCharacterBehaviorNow("idle");
-      requestCharacterMotion(selectCancelMotion(true));
+      setCharacterBehaviorNow(cue.behavior);
+      requestCharacterMotion(cue.motion);
       showControls();
       return;
     }
@@ -276,6 +289,13 @@ export function App() {
     characterIdleTimerRef.current = null;
   }
 
+  // 清理待机小动作计时器, 防止状态切换后旧 timer 抢动作.
+  function clearAmbientMotionTimer() {
+    if (ambientMotionTimerRef.current === null) return;
+    window.clearTimeout(ambientMotionTimerRef.current);
+    ambientMotionTimerRef.current = null;
+  }
+
   // 清理任务卡片自动隐藏计时器, 防止完成状态被旧 timer 提前清掉.
   function clearHideTaskCardTimer() {
     if (hideTaskCardTimerRef.current === null) return;
@@ -292,6 +312,24 @@ export function App() {
   // 请求播放一次性动作, id 用于允许连续播放同一种动作.
   function requestCharacterMotion(motion: CharacterMotion) {
     setMotionRequest({ motion, id: Date.now() + Math.random() });
+  }
+
+  // 安排低频待机小动作, 只在没有请求和待确认动作时触发.
+  function scheduleAmbientMotion() {
+    clearAmbientMotionTimer();
+    if (!canPlayAmbientMotion()) return;
+    const delay = AMBIENT_MOTION_MIN_DELAY_MS + Math.floor(Math.random() * AMBIENT_MOTION_RANDOM_DELAY_MS);
+    ambientMotionTimerRef.current = window.setTimeout(() => {
+      ambientMotionTimerRef.current = null;
+      if (!canPlayAmbientMotion()) return;
+      requestCharacterMotion(selectIdleAmbientMotion(Date.now()));
+      scheduleAmbientMotion();
+    }, delay);
+  }
+
+  // 判断当前是否适合播放待机动作, 避免打断说话, 任务和确认弹窗.
+  function canPlayAmbientMotion() {
+    return characterBehavior === "idle" && !pendingAction && !activeStreamIdRef.current;
   }
 
   // 延迟回到待机, 让说话或反馈动作保留一小段时间.
@@ -393,8 +431,8 @@ export function App() {
       </div>
       <ConfirmDialog
         action={pendingAction}
-        onOnce={() => void executePendingAction(false)}
-        onAlways={() => void executePendingAction(true)}
+        onOnce={(action) => void executePendingAction(false, action ?? pendingAction)}
+        onAlways={(action) => void executePendingAction(true, action ?? pendingAction)}
         onChoose={(action) => void executePendingAction(false, action)}
         onChooseDefault={(action) => void executePendingAction(true, action)}
         onCancel={() => void cancelPendingAction()}

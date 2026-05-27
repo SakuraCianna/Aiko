@@ -195,7 +195,8 @@ describe("registerAikoHandlers pending action approvals", () => {
       applicationProvider: () => browserApplications(),
       speechStreamingProvider: {
         async start(input) {
-          expect(input).toEqual({ sessionId: "speech-1", sampleRate: 16000, frameMs: 200 });
+          expect(input).toMatchObject({ sessionId: "speech-1", sampleRate: 16000, frameMs: 200 });
+          expect(input.onTranscript).toEqual(expect.any(Function));
         },
         async pushChunk(input) {
           pushedSequences.push(input.sequence);

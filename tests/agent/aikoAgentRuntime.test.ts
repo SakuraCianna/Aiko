@@ -1263,21 +1263,9 @@ describe("createAikoAgentRuntime", () => {
 
   it("dispatches memory and commitment writes through internal workers", async () => {
     const workerRuns: string[] = [];
-    const workerRegistry = {
-      register() {
-        return;
-      },
-      list() {
-        return [];
-      },
-      listRuns() {
-        return [];
-      },
-      async run(name: string, input: unknown) {
-        workerRuns.push(`${name}:${typeof input}`);
-        return null;
-      }
-    };
+    const workerRegistry = createRecordingWorkerRegistry(workerRuns, (name, input, options) =>
+      `${name}:${typeof input}:${options?.maxAttempts ?? 1}`
+    );
     const runtime = createAikoAgentRuntime({
       workerRegistry,
       agent: {
@@ -1290,10 +1278,114 @@ describe("createAikoAgentRuntime", () => {
     await runtime.respond(textPayload("I have an interview tomorrow."));
 
     expect(workerRuns).toEqual([
-      "memory_write_worker:object",
-      "experience_reflection_worker:object",
-      "commitment_worker:object"
+      "memory_write_worker:object:2",
+      "experience_reflection_worker:object:2",
+      "commitment_worker:object:2"
     ]);
+  });
+
+  it("dispatches retrieved live context through the research worker", async () => {
+    const workerRuns: string[] = [];
+    const runtime = createAikoAgentRuntime({
+      workerRegistry: createRecordingWorkerRegistry(workerRuns),
+      currentKnowledgeProvider: {
+        async retrieve() {
+          return {
+            kind: "weather",
+            title: "上海天气",
+            query: "上海",
+            source: "Open-Meteo",
+            sourceUrl: "https://open-meteo.com/en/docs",
+            createdAt: "2026-05-27T10:00:00.000Z",
+            summary: "多云, 当前 25°C.",
+            facts: [{ label: "当前气温", value: "25°C" }],
+            links: []
+          };
+        }
+      },
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: "上海现在大约 25°C." }] };
+        }
+      }
+    });
+
+    await runtime.respond(textPayload("查一下上海天气"));
+
+    expect(workerRuns).toContain("research_worker");
+  });
+
+  it("dispatches multi-step and file actions through specialized workers", async () => {
+    const workerRuns: string[] = [];
+    const runtime = createAikoAgentRuntime({
+      workerRegistry: createRecordingWorkerRegistry(workerRuns),
+      approvalThreadIdFactory: () => "approval-worker-batch",
+      agentFactory(actions) {
+        return {
+          async invoke() {
+            actions.push(modelAction("Cursor"));
+            actions.push({
+              title: "截取屏幕",
+              source: "检查当前桌面",
+              risk: "critical",
+              capability: "capture_screen",
+              target: "primary_display"
+            });
+            return { messages: [{ role: "assistant", content: "我会拆成两个动作, 等你确认." }] };
+          }
+        };
+      }
+    });
+
+    const response = await runtime.respond(textPayload("打开 Cursor 然后帮我看一下当前桌面"));
+
+    expect(response.pendingAction).toMatchObject({
+      capability: "batch_actions",
+      risk: "critical"
+    });
+    expect(workerRuns).toContain("multi_step_worker");
+  });
+
+  it("dispatches markdown and file-write actions through specialized workers", async () => {
+    const workerRuns: string[] = [];
+    const markdown = `# 学习计划\n\n${"分阶段执行, 每一段都要有明确产出.\n".repeat(90)}`;
+    const markdownRuntime = createAikoAgentRuntime({
+      workerRegistry: createRecordingWorkerRegistry(workerRuns),
+      agent: {
+        async invoke() {
+          return { messages: [{ role: "assistant", content: markdown }] };
+        }
+      }
+    });
+
+    await markdownRuntime.respond(textPayload("帮我生成一份完整学习计划"));
+
+    const fileRuntime = createAikoAgentRuntime({
+      workerRegistry: createRecordingWorkerRegistry(workerRuns),
+      approvalThreadIdFactory: () => "approval-worker-file",
+      agentFactory(actions) {
+        return {
+          async invoke() {
+            actions.push({
+              title: "写入文件:E:\\CodeHome\\Aiko\\notes.md",
+              source: "写入 notes",
+              risk: "high",
+              capability: "write_file",
+              target: "E:\\CodeHome\\Aiko\\notes.md",
+              params: {
+                content: "hello",
+                overwrite: false
+              }
+            });
+            return { messages: [{ role: "assistant", content: "我准备写入文件, 等你确认." }] };
+          }
+        };
+      }
+    });
+
+    await fileRuntime.respond(textPayload("写入 notes 文件"));
+
+    expect(workerRuns).toEqual(expect.arrayContaining(["desktop_markdown_worker", "file_operation_worker"]));
   });
 
   it("advertises internal worker boundaries without exposing extra personas", () => {
@@ -1309,7 +1401,11 @@ describe("createAikoAgentRuntime", () => {
       expect.objectContaining({ name: "memory_worker" }),
       expect.objectContaining({ name: "memory_write_worker" }),
       expect.objectContaining({ name: "commitment_worker" }),
-      expect.objectContaining({ name: "action_journal_worker" })
+      expect.objectContaining({ name: "action_journal_worker" }),
+      expect.objectContaining({ name: "research_worker" }),
+      expect.objectContaining({ name: "multi_step_worker" }),
+      expect.objectContaining({ name: "desktop_markdown_worker" }),
+      expect.objectContaining({ name: "file_operation_worker" })
     ]));
   });
 });
@@ -1380,4 +1476,25 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+}
+
+function createRecordingWorkerRegistry(
+  workerRuns: string[],
+  serialize: (name: string, input: unknown, options?: { maxAttempts?: number }) => string = (name) => name
+) {
+  return {
+    register() {
+      return;
+    },
+    list() {
+      return [];
+    },
+    listRuns() {
+      return [];
+    },
+    async run(name: string, input: unknown, options?: { maxAttempts?: number }) {
+      workerRuns.push(serialize(name, input, options));
+      return null;
+    }
+  };
 }

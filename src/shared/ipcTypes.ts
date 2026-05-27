@@ -9,11 +9,13 @@ export type PendingActionApprovalDto = {
   workflow?: "agent" | "action_approval";
 };
 
+export type RiskLevelDto = "low" | "medium" | "high" | "critical";
+
 export type PendingActionBaseDto = {
   id?: string;
   title: string;
   source: string;
-  risk: "low" | "medium" | "high";
+  risk: RiskLevelDto;
   capability: string;
   target: string;
   params?: Record<string, string | number | boolean>;
@@ -256,7 +258,7 @@ export type AikoActionJournalEntryDto = {
   runId?: string;
   capability: string;
   target: string;
-  risk: "low" | "medium" | "high";
+  risk: RiskLevelDto;
   source?: string;
   decision?: "approved" | "rejected" | "cancelled";
   ok?: boolean;
@@ -286,6 +288,7 @@ export type AikoWorkerRunDto = {
   id: string;
   workerName: string;
   status: "running" | "completed" | "failed";
+  attempts: number;
   inputSummary: string;
   outputSummary?: string;
   error?: string;

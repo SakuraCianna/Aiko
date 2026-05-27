@@ -18,6 +18,10 @@ describe("createDefaultToolRegistry", () => {
       "delete_file",
       "restore_file_from_trash",
       "run_shell_command",
+      "capture_screen",
+      "window_control",
+      "keyboard_input",
+      "mouse_input",
       "recall_memory",
       "list_reminders"
     ]);
@@ -55,6 +59,18 @@ describe("createDefaultToolRegistry", () => {
       requiresConfirmation: true,
       planOnly: true
     });
+  });
+
+  it("exposes critical Windows automation tools as plan-only confirmed actions", () => {
+    const registry = createDefaultToolRegistry();
+
+    for (const name of ["capture_screen", "window_control", "keyboard_input", "mouse_input"]) {
+      expect(registry.get(name)).toMatchObject({
+        risk: "critical",
+        requiresConfirmation: true,
+        planOnly: true
+      });
+    }
   });
 
   it("returns null for unknown tools", () => {

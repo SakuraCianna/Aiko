@@ -3,7 +3,10 @@ import type { ChatPayload } from "../../src/shared/chatPayload";
 import {
   selectActionResultCue,
   selectCancelMotion,
+  selectIdleAmbientMotion,
   selectInitialCharacterCue,
+  selectInterruptionCue,
+  selectWaitingCue,
   selectSpeechMotion
 } from "../../src/renderer/character/motionCues";
 
@@ -66,6 +69,27 @@ describe("motion cues", () => {
     });
     expect(selectCancelMotion(true)).toBe("interrupt");
     expect(selectCancelMotion(false)).toBe("deny");
+  });
+
+  it("selects ambient, waiting and interruption cues for desktop-pet presence", () => {
+    expect(selectIdleAmbientMotion(0)).toBe("idleShift");
+    expect(selectIdleAmbientMotion(1)).toBe("settle");
+    expect(selectWaitingCue(5)).toEqual({
+      behavior: "waiting",
+      motion: "wait"
+    });
+    expect(selectWaitingCue(45)).toEqual({
+      behavior: "waiting",
+      motion: "focus"
+    });
+    expect(selectInterruptionCue("cancelled")).toEqual({
+      behavior: "idle",
+      motion: "interrupt"
+    });
+    expect(selectInterruptionCue("replaced")).toEqual({
+      behavior: "recovering",
+      motion: "errorRecover"
+    });
   });
 });
 

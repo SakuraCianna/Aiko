@@ -164,6 +164,58 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     planOnly: true
   },
   {
+    name: "capture_screen",
+    description: "提出截取当前屏幕的关键风险待确认动作. 只生成动作, 不直接截图.",
+    capability: "capture_screen",
+    risk: "critical",
+    requiresConfirmation: true,
+    schema: {
+      target: "primary_display|string",
+      analysisPrompt: "string?",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "window_control",
+    description: "提出列出或聚焦 Windows 窗口的关键风险待确认动作. 只生成动作, 不直接控制.",
+    capability: "window_control",
+    risk: "critical",
+    requiresConfirmation: true,
+    schema: {
+      operation: "list|focus",
+      target: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "keyboard_input",
+    description: "提出向当前活动窗口发送键盘输入的关键风险待确认动作. 只生成动作, 不直接输入.",
+    capability: "keyboard_input",
+    risk: "critical",
+    requiresConfirmation: true,
+    schema: {
+      keys: "string",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
+    name: "mouse_input",
+    description: "提出移动或点击鼠标的关键风险待确认动作. 只生成动作, 不直接移动鼠标.",
+    capability: "mouse_input",
+    risk: "critical",
+    requiresConfirmation: true,
+    schema: {
+      x: "number",
+      y: "number",
+      click: "none|left|right?",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
     name: "recall_memory",
     description: "查询本地长期记忆.只用于上下文检索,不执行系统操作.",
     capability: "recall_memory",

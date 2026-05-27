@@ -22,8 +22,8 @@ describe("agent status motion cues", () => {
       motion: "write"
     });
     expect(selectAgentStatusCue(status("waiting_approval"))).toEqual({
-      behavior: "confirming",
-      motion: "notice"
+      behavior: "waiting",
+      motion: "wait"
     });
     expect(selectAgentStatusCue(status("action_executing"))).toEqual({
       behavior: "presenting",
@@ -53,6 +53,7 @@ describe("agent status motion cues", () => {
     expect(preload).toContain("agent:status");
     expect(app).toContain("onAgentStatus");
     expect(app).toContain("selectAgentStatusCue");
+    expect(app).toContain("selectIdleAmbientMotion");
   });
 });
 

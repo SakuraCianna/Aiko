@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { createAikoSpeechController, normalizeSpeechText, splitSpeechSegments } from "../../src/renderer/voice/speechOutput";
+import {
+  createAikoSpeechController,
+  createMouthShapeTimeline,
+  normalizeSpeechText,
+  splitSpeechSegments
+} from "../../src/renderer/voice/speechOutput";
 
 describe("speechOutput", () => {
   it("normalizes Markdown text before sending it to TTS", () => {
@@ -13,6 +18,14 @@ describe("speechOutput", () => {
       "第二句！",
       "第三句要继续说明, 但是不能一次塞给 TTS。"
     ]);
+  });
+
+  it("creates a phoneme-like mouth timeline from speech text", () => {
+    const timeline = createMouthShapeTimeline("你好 Aiko");
+
+    expect(timeline.length).toBeGreaterThan(4);
+    expect(timeline.some((value) => value > 0.6)).toBe(true);
+    expect(timeline.at(-1)).toBe(0);
   });
 
   it("queues cloud TTS segments and drives mouth sync while speaking", async () => {

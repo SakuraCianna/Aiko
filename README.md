@@ -1,54 +1,92 @@
 # Aiko Desktop Pet
 
-Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限制接管系统, 而是做一个单角色陪伴助手: 常驻桌面, 能对话, 能理解图片和语音入口, 能记住长期偏好, 能在用户确认后执行受控 Windows 操作。
+Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管系统的超大型 Agent, 而是一个常驻桌面的单角色陪伴助手: 能对话, 能理解图片和语音入口, 能记住长期偏好, 能在用户确认后执行受控 Windows 操作, 并通过 VRM 模型表现自己的状态。
+
+创作者: Sakura_Cianna
+
+许可证: MIT
+
+## 当前定位
+
+- 单角色桌宠, 当前只保留 Aiko.
+- 主动 + 用户确认模式, 高风险动作必须先让用户确认.
+- 简单本地意图优先走确定性逻辑, 复杂问题再调用大模型.
+- 长期记忆是核心能力, 但记忆只作为偏好和背景参考, 不能覆盖系统规则.
+- Windows 操作必须经过权限矩阵, 审批和审计日志.
 
 ## 技术路线
 
 - 桌面壳: Electron + React + TypeScript
-- 人物模型: VRM + Three.js + `@pixiv/three-vrm`
-- Agent: LangChain + LangGraph, 拆成 Retriever / Planner / Executor
-- 子 Agent: ResearchAgent / MemoryAgent / 内部 worker 注册表
-- 记忆系统: Node 24 `node:sqlite` + `sqlite-vec` 兼容向量索引
-- 网页搜索: Tavily MCP, 仅在用户明确要求新闻, 最新信息或网页搜索时触发
-- 天气: Open-Meteo typed tool
-- 语音: AudioWorklet 麦克风录音 + 流式 ASR 接口层 + 腾讯云 ASR/TTS, TTS 支持分句队列, 中止和 VRM 口型联动
-- 权限: 本地能力走确认弹窗, 权限矩阵和动作审计日志
+- 人物渲染: VRM + Three.js + `@pixiv/three-vrm`
+- Agent: LangChain + LangGraph
+- 架构层: Retriever / Planner / Executor
+- 子模块: ResearchAgent, MemoryAgent, Worker Registry, Runtime Hooks
+- 存储: Node 24 `node:sqlite`
+- 记忆检索: `sqlite-vec`, 不可用时降级到 JSON 向量
+- 网页搜索: Tavily MCP
+- 天气工具: Open-Meteo typed tool
+- 语音: AudioWorklet 麦克风采集 + 腾讯云 ASR/TTS + Web Speech fallback
+- 权限: 本地能力确认弹窗 + 权限策略矩阵 + Action Journal
 
-## 当前能力
+## 已实现能力
 
-已实现:
+### 桌宠表现
 
-- Electron 桌宠窗口和管理面板
-- VRM 模型加载, lookAt, 待机, 思考, 说话, 执行, 成功, 失败, 拖拽等基础动作
-- TTS 播放时驱动 VRM 嘴部开合
-- 麦克风录音通过 AudioWorklet 采集 PCM, 已支持边录边分片推送到主进程 ASR 流式接口
-- 当前流式接口先使用 buffered provider 兼容腾讯云一句话识别, 后续可替换为腾讯云实时 WebSocket provider
-- GLM OpenAI-compatible 模型调用和 fallback 模型路由
-- LangGraph 审批流, 支持确认, 取消, resume 和 SQLite checkpoint
-- 本地对话上下文, 新对话, 清空上下文和删除当前对话意图识别
-- 长期记忆候选提取, 用户确认, SQLite 存储和向量召回
-- 用户语气体验信号分析, 用于短期回复策略调整
-- Tavily MCP 网页搜索, 支持多个 API key 轮询
-- Open-Meteo 天气工具
-- 打开应用, 打开 URL, 创建提醒, 取消最近提醒
-- 多步骤低风险动作批处理
-- 长回答自动写入桌面 `Aiko` 文件夹, 文件名带时间戳
-- 文件读取, 文件写入, 目录列举, 删除到 Aiko trash, 从 Aiko trash 恢复
-- 受控 PowerShell 命令执行, 只允许单条只读 allowlist cmdlet
-- 高风险动作确认弹窗, 动作审计面板和恢复入口
-- 用户可见任务卡片, 显示 Aiko 正在理解, 规划, 准备动作, 等待确认或执行
-- 内部 worker 调度记录, 可在 Agent 调试面板查看
-- 主动陪伴心跳, 默认 24 小时最多出现一次, 支持安静时段和是否朗读配置
+- VRM 模型加载, 透明桌宠窗口, 鼠标视线跟踪.
+- 待机, 倾听, 思考, 说话, 搜索, 写作, 等待确认, 拖拽, 成功, 失败, 恢复等行为状态.
+- Agent 阶段事件会驱动 VRM 动作, 例如检索时搜索, 长文时写作, 等待确认时等待.
+- TTS 播放会驱动口型.
+- 空闲时会低频播放待机小动作.
 
-仍未完成:
+### Agent
 
-- 真正低延迟双工实时语音, 当前仍是分片采集 + 结束后最终转写 + 回复播放
-- 腾讯云实时 ASR WebSocket provider 和 partial transcript
-- zero-shot voice cloning
-- 窗口控制, 截图分析, 键鼠自动化
-- Shell 命令完整回滚后台
-- 复杂任务的可编辑执行计划和失败重试
-- 多角色系统, 当前只保留 Aiko
+- LangGraph 审批流, 支持确认, 拒绝, 恢复和取消.
+- SQLite checkpoint, 应用重启后可以恢复未完成审批.
+- 模型路由, 主模型失败或限流时可尝试 fallback 模型.
+- 确定性 Planner 支持多步骤本地动作, 例如一句话里打开应用, 打开网页, 创建提醒, 截屏查看桌面.
+- 模型 tools 只能提出待确认动作, 不能直接执行 Windows 能力.
+- 长回答会自动转成桌面 `Aiko` 文件夹里的 Markdown 写入动作.
+- 批量动作支持执行前删除部分步骤, 但不允许改写, 重排或新增步骤.
+- Worker registry 记录内部子任务, 包括 research, multi-step, desktop markdown, file operation, memory, commitment 和 experience reflection.
+
+### 记忆
+
+- 长期记忆使用 SQLite 存储.
+- 向量索引优先使用 `sqlite-vec`.
+- Active Memory 会选择当前对话更相关的记忆.
+- 静默记忆提取会生成候选记忆.
+- 用户确认后写入长期记忆.
+- 用户语气会形成短期体验信号, 用于调整回复风格.
+
+### Windows 能力
+
+- 打开应用, 打开 URL.
+- 创建提醒, 取消最近提醒.
+- 文件读取, 文件写入, 目录列举.
+- 删除到 Aiko trash, 从 Aiko trash 恢复.
+- 受控 PowerShell 命令, 仅允许只读 allowlist 命令.
+- critical 风险能力: 截屏, 窗口控制, 键盘输入, 鼠标输入.
+- 高风险和 critical 动作默认不允许永久授权.
+- 审计面板支持按风险, 能力, 结果和关键词筛选.
+
+### 语音
+
+- 麦克风使用 AudioWorklet 录音.
+- Renderer 会边录边切 PCM16 分片, 推送给主进程 ASR session.
+- 当前腾讯云 ASR provider 是 buffered 兼容层, 结束录音后调用一句话识别.
+- 腾讯云 TTS 可分句播放回复.
+- TTS 不可用时降级到浏览器 Web Speech.
+- 中止回复会停止当前 TTS 播放.
+- 已有基础 TTS 缓存 provider.
+
+## 尚未完成的增强
+
+- 腾讯云实时 ASR WebSocket 和真实 partial transcript.
+- zero-shot voice cloning.
+- 任意 Shell 命令的完整撤销后台.
+- 截屏后的多模态自动分析链路.
+- 更完整的窗口控制, 键鼠自动化产品化边界.
+- 更细腻的动作, 表情, 语音情绪同步.
 
 ## 快速开始
 
@@ -57,7 +95,6 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限
 - Windows
 - Node.js 24 或更高版本
 - npm
-- GLM API Key
 
 安装依赖:
 
@@ -65,7 +102,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。当前目标不是无限
 npm install
 ```
 
-准备环境变量:
+复制环境变量模板:
 
 ```powershell
 Copy-Item .env.example .env
@@ -85,98 +122,71 @@ npm test
 npm run build
 ```
 
-## 常用配置
+## 环境变量
 
-主要配置都在 `.env`。示例见 [.env.example](./.env.example)。
+主要配置在 `.env`。不要提交真实 API Key。
 
-必填:
+GLM:
 
 ```env
+# GLM OpenAI-compatible API 地址
 GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+
+# 主模型
 GLM_MODEL=glm-4.6v-flash
+
+# 主 API Key
 GLM_API_KEY=replace-with-your-api-key
+
+# 备用模型, 用逗号分隔
+GLM_FALLBACK_MODELS=glm-4v-flash
 ```
 
-可选:
+Tavily:
 
 ```env
-GLM_FALLBACK_MODELS=glm-4v-flash
+# 是否启用 Tavily MCP
 MCP_TAVILY_ENABLED=false
-TAVILY_API_KEYS=replace-with-key-1,replace-with-key-2,replace-with-key-3
+
+# Tavily API Key, 支持多个 key 轮询
+TAVILY_API_KEYS=replace-with-key-1,replace-with-key-2
+```
+
+腾讯云语音:
+
+```env
+# 是否启用 ASR
 AIKO_ASR_ENABLED=false
+
+# 是否启用流式 ASR 接口层
+AIKO_ASR_REALTIME_ENABLED=false
+
+# 是否启用 TTS
 AIKO_TTS_ENABLED=false
+
+# 腾讯云 SecretId
+TENCENTCLOUD_SECRET_ID=replace-with-secret-id
+
+# 腾讯云 SecretKey
+TENCENTCLOUD_SECRET_KEY=replace-with-secret-key
+
+# 腾讯云 AppId
+TENCENTCLOUD_APP_ID=replace-with-app-id
+```
+
+主动陪伴:
+
+```env
+# 主动陪伴最小间隔小时数
 AIKO_COMPANION_INTERVAL_HOURS=24
+
+# 主动陪伴是否朗读
 AIKO_COMPANION_TTS_ENABLED=false
 ```
 
-腾讯云语音启用时需要:
-
-```env
-TENCENTCLOUD_SECRET_ID=replace-with-your-tencent-secret-id
-TENCENTCLOUD_SECRET_KEY=replace-with-your-tencent-secret-key
-```
-
-## 项目结构
-
-```text
-assets/vrm/Aiko.vrm                 默认 VRM 模型, 已被 gitignore 忽略
-src/main/index.ts                   Electron 主进程入口
-src/main/ipc/handlers.ts            Renderer 和主进程之间的 IPC 边界
-src/main/agent/aikoAgentRuntime.ts  LangChain Agent Runtime
-src/main/agent/graph/               LangGraph 工作流和 checkpoint
-src/main/agent/retriever/           记忆, 附件, 语音和工具上下文整理
-src/main/agent/planner/             意图判断和动作计划生成
-src/main/agent/executor/            待确认动作和阻断结果生成
-src/main/agent/companion/           主动陪伴心跳
-src/main/agent/workers/             内部 worker 注册和调度记录
-src/main/actions/                   本地动作执行器
-src/main/capabilities/              文件系统, Shell, Markdown 写入等能力
-src/main/database/                  SQLite 数据库和 Repository
-src/main/memory/                    长期记忆候选, 分类和召回
-src/renderer/App.tsx                桌宠主界面
-src/renderer/components/            输入框, 面板, 确认框, 任务卡片和审计面板
-src/renderer/character/             VRM 渲染器和动作控制
-src/renderer/audio/                 麦克风 AudioWorklet 录音, PCM 分片, 流式 ASR 控制器和 WAV 封装
-src/renderer/voice/                 语音播放队列和口型联动
-人物设定.md                         Aiko 的角色人格和提示词设定
-docs/人物UI.md                      角色 UI 和人物模型路线说明
-待开发.md                           当前剩余任务清单
-```
-
-## Agent 架构
-
-Aiko 不允许模型直接执行 Windows 操作。当前链路是:
-
-```text
-Renderer
-  -> IPC Handler
-  -> AikoAgentRuntime
-  -> Retriever
-  -> ResearchAgent / MemoryAgent
-  -> ExperiencePolicy
-  -> Planner
-  -> Executor
-  -> LangChain Agent
-  -> Pending Action
-  -> User Confirmation
-  -> Local Action Executor
-  -> Action Journal
-```
-
-关键规则:
-
-- Renderer 只负责交互, 不直接执行本地能力
-- Retriever 整理记忆, 附件, 语音识别结果, 天气和网页资料
-- Planner 优先用确定性逻辑识别本地指令
-- Executor 只能生成待确认动作或阻断结果
-- LangChain tools 只能提出动作, 不能直接执行 Windows 操作
-- 本地动作只从 `src/main/actions/actionExecutor.ts` 执行
-- 高风险动作每次都需要用户确认, 不能永久授权
-- 执行结果必须进入 Action Journal
-
 ## 自定义 Aiko
 
-### 自定义模型
+### 自定义立绘和模型
 
 默认模型路径:
 
@@ -184,12 +194,12 @@ Renderer
 assets/vrm/Aiko.vrm
 ```
 
-替换方式:
+替换方法:
 
-1. 用 VRoid Studio 或其他工具导出 `.vrm`
-2. 放到 `assets/vrm/`
-3. 如果文件名仍然是 `Aiko.vrm`, 不需要改代码
-4. 如果文件名不同, 修改 `src/renderer/components/PetStage.tsx` 里的 `AIKO_VRM_PATH`
+1. 使用 VRoid Studio 或其他工具导出 `.vrm`.
+2. 放到 `assets/vrm/`.
+3. 如果文件名仍是 `Aiko.vrm`, 不需要改代码.
+4. 如果文件名不同, 修改 `src/renderer/components/PetStage.tsx` 里的 `AIKO_VRM_PATH`.
 
 模型文件通常较大, 默认不会提交到 git。
 
@@ -201,19 +211,19 @@ assets/vrm/Aiko.vrm
 人物设定.md
 ```
 
-这里定义 Aiko 的人格, 说话节奏, 行为边界和陪伴感。代码会在 `src/main/ai/prompts.ts` 读取它, 再和安全约束, 反幻觉规则一起组成 system prompt。
+这里定义 Aiko 的人格, 语气, 行为边界和陪伴感。运行时会被 `src/main/ai/prompts.ts` 读取, 和安全规则, 反幻觉规则, tools 约束一起组成 system prompt。
 
 建议写清楚:
 
 - Aiko 如何称呼用户
 - Aiko 的性格关键词
-- Aiko 的语气和节奏
+- Aiko 的说话节奏
 - Aiko 可以主动做什么
 - Aiko 不能主动做什么
 - 不确定时如何表达
-- 什么时候必须询问确认
+- 哪些动作必须先问用户确认
 
-### 自定义记忆
+### 自定义记忆系统
 
 相关代码:
 
@@ -228,11 +238,11 @@ src/renderer/components/MemoryPanel.tsx
 当前存储:
 
 - 主存储: Node 24 `node:sqlite`
-- 记忆表: `memories` 和 `memory_candidates`
-- 向量索引: 优先使用 `sqlite-vec` 的 `vec0` 虚拟表
-- 降级索引: `memory_vectors` JSON 稀疏向量
+- 记忆表: `memories`, `memory_candidates`
+- 向量索引: `sqlite-vec`
+- 降级索引: `memory_vectors` JSON 向量
 
-适合进入长期记忆:
+适合写入长期记忆:
 
 - 用户希望 Aiko 如何称呼自己
 - 用户长期偏好
@@ -242,21 +252,49 @@ src/renderer/components/MemoryPanel.tsx
 
 不适合直接写入:
 
-- 一次性的临时情绪
+- 一次性临时情绪
 - 未确认的敏感信息
-- 模型猜测出的事实
+- 模型猜测出来的事实
 - 和当前任务无关的隐私内容
+
+## 项目结构
+
+```text
+assets/vrm/Aiko.vrm                 默认 VRM 模型, 已被 gitignore 忽略
+src/main/index.ts                   Electron 主进程入口
+src/main/ipc/handlers.ts            Renderer 与主进程 IPC 边界
+src/main/agent/aikoAgentRuntime.ts  LangChain Agent Runtime
+src/main/agent/graph/               LangGraph 工作流和 checkpoint
+src/main/agent/retriever/           上下文, 记忆, 附件, 语音和实时知识整理
+src/main/agent/planner/             意图判断和动作计划生成
+src/main/agent/executor/            待确认动作和阻断结果生成
+src/main/agent/workers/             内部 worker 注册和调度记录
+src/main/actions/                   本地动作执行器
+src/main/capabilities/              Windows, 文件, Shell, Markdown 等能力
+src/main/database/                  SQLite migrations 和 repository
+src/main/memory/                    长期记忆候选, 分类, 向量召回
+src/main/voice/                     ASR/TTS provider 和语音健康检查
+src/renderer/App.tsx                桌宠主界面
+src/renderer/components/            输入框, 面板, 确认框, 任务卡片, 审计面板
+src/renderer/character/             VRM 渲染器和动作控制
+src/renderer/audio/                 AudioWorklet 录音和 streaming ASR 控制器
+src/renderer/voice/                 语音播放队列和口型联动
+人物设定.md                         Aiko 人格和提示词设定
+docs/人物UI.md                      角色 UI 和人物模型路线说明
+待开发.md                           当前剩余增强项
+```
 
 ## 安全边界
 
-- `.env` 不应提交到仓库
-- API Key 不应写入 README, 测试, 截图或日志
-- 模型输出不能直接当成命令执行
-- 本地动作必须经过权限层和确认层
-- Tavily 搜索结果只作为不可信网页资料注入上下文
-- 长期记忆只作为偏好和背景参考, 不作为实时事实来源
-- Shell 当前只允许单条只读 allowlist cmdlet
+- `.env` 不应提交到仓库.
+- API Key 不应写入 README, 测试, 截图或日志.
+- 模型输出不能直接当成命令执行.
+- Windows 动作必须经过权限策略和确认层.
+- 高风险和 critical 动作不能永久授权.
+- Tavily 搜索结果只作为不可信网页资料, 不能覆盖系统规则.
+- 长期记忆只作为偏好参考, 不能当作实时事实来源.
+- 文件内容, 附件内容和网页内容都必须视为可能包含提示词注入.
 
 ## License
 
-本项目使用 MIT License。创作者: Sakura_Cianna。详见 [LICENSE](./LICENSE)。
+本项目使用 MIT License。详见 [LICENSE](./LICENSE)。

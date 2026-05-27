@@ -30,7 +30,8 @@ const BEHAVIOR_EXPRESSION: Record<CharacterBehavior, CharacterExpression> = {
   curious: "notice",
   presenting: "happy",
   shy: "smile",
-  recovering: "worried"
+  recovering: "worried",
+  waiting: "notice"
 };
 
 type ActiveMotion = {
@@ -66,7 +67,11 @@ const MOTION_DURATION_MS: Record<CharacterMotion, number> = {
   interrupt: 700,
   dragHold: 900,
   errorRecover: 1500,
-  emphasis: 850
+  emphasis: 850,
+  idleShift: 1200,
+  wait: 1100,
+  focus: 1400,
+  relief: 900
 };
 
 type PoseBone = { rotation: { x: number; y: number; z: number } };
@@ -492,6 +497,31 @@ export function createVrmCharacterRenderer(): CharacterRenderer {
         setOptionalBoneRotation(rightLowerArm, -0.16 * pulse, 0, -0.18 * pulse);
         setOptionalBoneRotation(rightHand, -0.04 * pulse, 0, -0.16 * pulse);
         break;
+      case "idleShift":
+        applySceneAccent(sceneAccentState, { x: 0.012 * wave, y: 0.006 * pulse, rotationZ: 0.018 * slowEase(progress) });
+        setOptionalBoneRotation(chest, 0.015 * pulse, 0.02 * wave, 0.018 * slowEase(progress));
+        setOptionalBoneRotation(neck, -0.012 * pulse, 0.03 * wave, 0.012 * wave);
+        setOptionalBoneRotation(leftUpperArm, 0.03 * pulse, 0, 0.05 * pulse);
+        setOptionalBoneRotation(rightUpperArm, 0.03 * pulse, 0, -0.05 * pulse);
+        break;
+      case "wait":
+        applySceneAccent(sceneAccentState, { y: 0.012 * pulse, scale: 0.006 * pulse });
+        setOptionalBoneRotation(chest, 0.025 * pulse, 0, 0);
+        setOptionalBoneRotation(neck, -0.02 * pulse, 0.035 * wave, 0);
+        setOptionalBoneRotation(head, -0.012 * pulse, 0.04 * wave, 0);
+        break;
+      case "focus":
+        applySceneAccent(sceneAccentState, { x: 0.008 * wave, rotationZ: -0.014 * pulse });
+        setOptionalBoneRotation(chest, -0.035 * pulse, 0.03 * wave, -0.02 * pulse);
+        setOptionalBoneRotation(neck, -0.045 * pulse, 0.04 * wave, 0.012 * wave);
+        setOptionalBoneRotation(head, -0.025 * pulse, 0.05 * wave, 0.014 * wave);
+        setOptionalBoneRotation(rightUpperArm, -0.08 * pulse, 0, -0.12 * pulse);
+        break;
+      case "relief":
+        applySceneAccent(sceneAccentState, { y: -0.01 * pulse + 0.016 * Math.sin(progress * Math.PI * 1.5), rotationZ: 0.018 * wave });
+        setOptionalBoneRotation(chest, -0.03 * pulse + 0.05 * Math.sin(progress * Math.PI * 1.5), 0, 0.02 * wave);
+        setOptionalBoneRotation(neck, 0.035 * pulse - 0.04 * Math.sin(progress * Math.PI * 1.5), 0.02 * wave, 0);
+        break;
       case "idle":
         activeMotion = null;
         break;
@@ -618,6 +648,13 @@ function updateCharacterBehavior(vrm: VRM, elapsed: number, behavior: CharacterB
       setOptionalBoneRotation(neck, 0.035 - 0.012 * slowWave, 0.02 * wave, 0.012 * wave);
       setOptionalBoneRotation(leftUpperArm, 0.045, 0, 0.04);
       setOptionalBoneRotation(rightUpperArm, 0.045, 0, -0.04);
+      break;
+    case "waiting":
+      setOptionalBoneRotation(chest, 0.012 + 0.01 * slowWave, 0.018 * wave, 0);
+      setOptionalBoneRotation(spine, 0, 0.01 * slowWave, 0);
+      setOptionalBoneRotation(neck, -0.02 + 0.006 * wave, 0.04 * slowWave, 0);
+      setOptionalBoneRotation(leftUpperArm, 0.025, 0, 0.08 + 0.015 * wave);
+      setOptionalBoneRotation(rightUpperArm, 0.025, 0, -0.08 - 0.015 * wave);
       break;
     case "idle":
     default:
@@ -866,4 +903,9 @@ function aspectRatio(element: HTMLElement): number {
 // 把数值限制在指定区间内.
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+// 给待机小动作一个慢速缓入, 避免突然偏头或位移.
+function slowEase(progress: number): number {
+  return Math.sin(Math.max(0, Math.min(1, progress)) * Math.PI * 0.5);
 }

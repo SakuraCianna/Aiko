@@ -15,7 +15,8 @@ export function createVoiceHealthService(config: AppConfig, _fetchImpl: typeof f
           enabled: config.voice.asr.enabled,
           secretId: config.voice.asr.secretId,
           secretKey: config.voice.asr.secretKey,
-          baseUrl: "https://asr.tencentcloudapi.com"
+          appId: config.voice.asr.realtimeEnabled ? config.voice.asr.appId : "not-required",
+          baseUrl: config.voice.asr.realtimeEnabled ? "wss://asr.cloud.tencent.com" : "https://asr.tencentcloudapi.com"
         }),
         tts: checkTencentProvider({
           enabled: config.voice.tts.enabled,
@@ -33,6 +34,7 @@ function checkTencentProvider(input: {
   enabled: boolean;
   secretId: string;
   secretKey: string;
+  appId?: string;
   baseUrl: string;
 }): VoiceProviderStatusDto {
   if (!input.enabled) {
@@ -43,12 +45,12 @@ function checkTencentProvider(input: {
       message: "disabled"
     };
   }
-  if (!input.secretId || !input.secretKey) {
+  if (!input.secretId || !input.secretKey || input.appId === "") {
     return {
       provider: "tencent-cloud",
       status: "unreachable",
       baseUrl: input.baseUrl,
-      message: "missing Tencent Cloud credentials"
+      message: input.appId === "" ? "missing Tencent Cloud AppId" : "missing Tencent Cloud credentials"
     };
   }
   return {

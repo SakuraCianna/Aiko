@@ -3,7 +3,7 @@ import type { CapabilityDecision, CapabilityRequest } from "../capabilities/capa
 export type PermissionRule = {
   capability: string;
   target: string;
-  risk: "low" | "medium" | "high";
+  risk: "low" | "medium" | "high" | "critical";
 };
 
 // 创建内存权限服务, 用于判断动作是否需要用户确认.
@@ -24,7 +24,7 @@ export function createPermissionService(initialRules: PermissionRule[]) {
       return { allowed: false, reason: "confirmation_required" };
     },
 
-    // 只记住低风险能力请求, 中高风险动作每次都需要确认.
+    // 只记住低风险能力请求, 中高风险和关键风险动作每次都需要确认.
     remember(request: CapabilityRequest) {
       if (request.risk !== "low") return;
       rules.set(ruleKey(request), request);

@@ -142,6 +142,9 @@ export function detectDeterministicAction(input: string, now: () => Date = () =>
   const fileRead = detectFileReadRequest(text);
   if (fileRead) return fileRead;
 
+  const screenCapture = detectScreenCaptureRequest(text);
+  if (screenCapture) return screenCapture;
+
   const openMatch = text.match(/^(?:请|麻烦)?(?:你)?(?:帮我)?(?:打开|启动|运行|开启|开一下)\s*(?:一下)?\s*(.+)$/);
   if (openMatch?.[1]) {
     const query = normalizeApplicationQuery(openMatch[1]);
@@ -230,6 +233,24 @@ function detectFileReadRequest(text: string): DetectedAction | null {
       risk: "high",
       capability: "read_file",
       target
+  });
+}
+
+// 识别用户明确要求查看当前屏幕或桌面的请求, 这类能力属于 critical 风险.
+function detectScreenCaptureRequest(text: string): DetectedAction | null {
+  if (!/(?:截屏|截图|当前桌面|当前屏幕|屏幕内容|桌面内容|看一下桌面|看一下屏幕|看看桌面|看看屏幕)/.test(text)) {
+    return null;
+  }
+
+  return toDetectedAction({
+      title: "截取屏幕:primary_display",
+      source: text,
+      risk: "critical",
+      capability: "capture_screen",
+      target: "primary_display",
+      params: {
+        analysisPrompt: cleanupLocalTarget(text) || "查看当前屏幕"
+      }
   });
 }
 

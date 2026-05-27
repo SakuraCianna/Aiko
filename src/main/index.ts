@@ -26,7 +26,9 @@ import type { AppStateRepository } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
 import { createBufferedSpeechStreamingProvider } from "./voice/bufferedSpeechStreamingProvider";
+import { createCachedSpeechSynthesisProvider } from "./voice/cachedSpeechSynthesisProvider";
 import { createTencentCloudSpeechUnderstandingProvider } from "./voice/tencentCloudAsrProvider";
+import { createTencentCloudRealtimeAsrProvider } from "./voice/tencentCloudRealtimeAsrProvider";
 import { createTencentCloudSpeechSynthesisProvider } from "./voice/tencentCloudTtsProvider";
 import { createVoiceHealthService } from "./voice/voiceHealth";
 import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
@@ -60,10 +62,12 @@ void app.whenReady().then(() => {
     ? createTencentCloudSpeechUnderstandingProvider(config.voice.asr)
     : undefined;
   const speechStreamingProvider = speechUnderstandingProvider
-    ? createBufferedSpeechStreamingProvider(speechUnderstandingProvider)
+    ? config.voice.asr.realtimeEnabled
+      ? createTencentCloudRealtimeAsrProvider(config.voice.asr)
+      : createBufferedSpeechStreamingProvider(speechUnderstandingProvider)
     : undefined;
   const speechSynthesisProvider = config.voice.tts.enabled
-    ? createTencentCloudSpeechSynthesisProvider(config.voice.tts)
+    ? createCachedSpeechSynthesisProvider(createTencentCloudSpeechSynthesisProvider(config.voice.tts))
     : undefined;
   const voiceHealthService = createVoiceHealthService(config);
   stopAgentStatusForwarder = attachAikoAgentStatusForwarder([petWindow, panelWindow], hooks);

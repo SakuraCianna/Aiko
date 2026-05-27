@@ -22,6 +22,8 @@ export type AppConfig = {
   voice: {
     asr: {
       enabled: boolean;
+      realtimeEnabled: boolean;
+      appId: string;
       provider: "tencent-cloud";
       secretId: string;
       secretKey: string;
@@ -166,13 +168,17 @@ function readTavilyMcpConfig(env: NodeJS.ProcessEnv): AppConfig["mcp"]["tavily"]
 // 读取腾讯云语音配置, ASR/TTS 任一启用时必须提供 SecretId 和 SecretKey.
 function readVoiceConfig(env: NodeJS.ProcessEnv): AppConfig["voice"] {
   const asrEnabled = readBoolean(env, "AIKO_ASR_ENABLED", false);
+  const asrRealtimeEnabled = readBoolean(env, "AIKO_ASR_REALTIME_ENABLED", false);
   const ttsEnabled = readBoolean(env, "AIKO_TTS_ENABLED", false);
   const credentials = readTencentCredentials(env, asrEnabled || ttsEnabled);
+  const appId = readTencentAppId(env, asrRealtimeEnabled);
   const region = readOptional(env, "TENCENTCLOUD_REGION") || DEFAULT_TENCENT_REGION;
 
   return {
     asr: {
       enabled: asrEnabled,
+      realtimeEnabled: asrRealtimeEnabled,
+      appId,
       provider: readAsrProvider(env.AIKO_ASR_PROVIDER),
       secretId: credentials.secretId,
       secretKey: credentials.secretKey,
@@ -195,6 +201,15 @@ function readVoiceConfig(env: NodeJS.ProcessEnv): AppConfig["voice"] {
       timeoutMs: readPositiveInteger(env, "AIKO_TTS_TIMEOUT_MS", 30000)
     }
   };
+}
+
+// 读取腾讯云 AppId, 只有实时 ASR WebSocket 需要它.
+function readTencentAppId(env: NodeJS.ProcessEnv, required: boolean) {
+  const appId = readOptional(env, "TENCENTCLOUD_APP_ID");
+  if (required && !appId) {
+    throw new Error("Missing required environment variable: TENCENTCLOUD_APP_ID");
+  }
+  return appId;
 }
 
 // 读取腾讯云访问密钥, 未启用云语音时允许为空.

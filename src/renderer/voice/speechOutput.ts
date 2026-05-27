@@ -100,14 +100,14 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
       if (!response.ok || generation !== speechGeneration) return false;
       const audio = new AudioCtor(response.dataUrl);
       activeAudio = audio;
-      return await playAudioElement(audio, options, generation);
+      return await playAudioElement(audio, text, options, generation);
     } catch {
       return false;
     }
   }
 
   // 播放 HTMLAudioElement, 把播放生命周期转成 Promise.
-  function playAudioElement(audio: HTMLAudioElement, options: SpeakOptions, generation: number) {
+  function playAudioElement(audio: HTMLAudioElement, segment: string, options: SpeakOptions, generation: number) {
     return new Promise<boolean>((resolve) => {
       let resolved = false;
       const settle = (ok: boolean) => {
@@ -124,7 +124,7 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
           return;
         }
         options.onStart?.();
-        startMouthDriver(options.onMouthOpen);
+        startMouthDriver(segment, options.onMouthOpen);
       };
       audio.onended = () => settle(true);
       audio.onerror = () => settle(false);
@@ -147,15 +147,17 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
     stopMouthDriver();
   }
 
-  // 启动轻量口型驱动, 后续可以替换成真实音素/音量曲线.
-  function startMouthDriver(onMouthOpen: ((value: number) => void) | undefined) {
+  // 启动基于文本音素能量曲线的口型驱动, 比固定正弦更贴近当前朗读内容.
+  function startMouthDriver(segment: string, onMouthOpen: ((value: number) => void) | undefined) {
     latestMouthCallback = onMouthOpen;
     if (!latestMouthCallback) return;
     stopMouthDriver(false);
-    latestMouthCallback(0.55);
+    const timeline = createMouthShapeTimeline(segment);
+    let frameIndex = 0;
+    latestMouthCallback(timeline[frameIndex] ?? 0.45);
     mouthTimer = setInterval(() => {
-      const phase = (Date.now() / 90) % Math.PI;
-      latestMouthCallback?.(0.22 + Math.abs(Math.sin(phase)) * 0.48);
+      frameIndex = (frameIndex + 1) % timeline.length;
+      latestMouthCallback?.(timeline[frameIndex] ?? 0.25);
     }, 90);
   }
 
@@ -167,6 +169,31 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
     }
     if (closeMouth) latestMouthCallback?.(0);
   }
+}
+
+// 根据文本生成轻量音素能量曲线, 用于驱动 VRM 嘴部开合.
+export function createMouthShapeTimeline(text: string): number[] {
+  const chars = normalizeSpeechText(text).split("").filter((char) => char.trim().length > 0);
+  if (chars.length === 0) return [0];
+
+  const values: number[] = [];
+  for (const char of chars) {
+    const energy = estimateMouthEnergy(char);
+    values.push(Math.max(0.08, energy * 0.45));
+    values.push(energy);
+    values.push(Math.max(0.12, energy * 0.35));
+  }
+  values.push(0);
+  return values;
+}
+
+// 粗略估算一个字符的开口强度, 中文和元音更大, 标点更小.
+function estimateMouthEnergy(char: string) {
+  if (/[\u3002\uff0c\uff01\uff1f,.!?;；:：]/.test(char)) return 0.08;
+  if (/[aAoOeEiIuUvV]/.test(char)) return 0.78;
+  if (/[\u4e00-\u9fff]/.test(char)) return 0.66;
+  if (/[bpmfdtnlgkhjqxrzcsyw]/i.test(char)) return 0.48;
+  return 0.36;
 }
 
 // 使用浏览器 Web Speech API 作为兜底语音合成.

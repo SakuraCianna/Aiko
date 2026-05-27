@@ -373,6 +373,34 @@ button {
   line-height: 1.45;
 }
 
+.safety-impact-preview {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(73, 101, 126, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #2e4558;
+  font-size: 12px;
+}
+
+.safety-impact-preview dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.safety-impact-preview dt {
+  color: #6c7f91;
+}
+
+.safety-impact-preview dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .rollback-note {
   color: #49657e;
   font-size: 13px;
@@ -877,6 +905,11 @@ button {
 .audit-risk-high .risk-badge {
   background: rgba(255, 229, 233, 0.96);
   color: #8d3241;
+}
+
+.audit-risk-critical .risk-badge {
+  background: rgba(255, 214, 217, 0.98);
+  color: #7c1f2d;
 }
 
 .audit-state-row {
