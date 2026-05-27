@@ -5,74 +5,56 @@ export type VoiceHealthService = {
   snapshot: () => Promise<VoiceStatusSnapshotDto>;
 };
 
-// 创建语音服务健康检查器, 用于设置面板展示 ASR/TTS 是否真实接通.
-export function createVoiceHealthService(config: AppConfig, fetchImpl: typeof fetch = fetch): VoiceHealthService {
+// 创建语音服务健康检查器, 腾讯云 provider 只检查配置完整性, 不做付费探活调用.
+export function createVoiceHealthService(config: AppConfig, _fetchImpl: typeof fetch = fetch): VoiceHealthService {
   return {
-    // 并行检查 ASR 和 TTS 状态, 失败时返回 unreachable 而不是抛出异常.
+    // 并行返回 ASR 和 TTS 状态, 缺密钥时明确显示为不可用.
     async snapshot() {
-      const [asr, tts] = await Promise.all([
-        checkProvider({
+      return {
+        asr: checkTencentProvider({
           enabled: config.voice.asr.enabled,
-          provider: config.voice.asr.provider,
-          baseUrl: config.voice.asr.baseUrl,
-          timeoutMs: config.voice.asr.timeoutMs,
-          fetchImpl
+          secretId: config.voice.asr.secretId,
+          secretKey: config.voice.asr.secretKey,
+          baseUrl: "https://asr.tencentcloudapi.com"
         }),
-        checkProvider({
+        tts: checkTencentProvider({
           enabled: config.voice.tts.enabled,
-          provider: config.voice.tts.provider,
-          baseUrl: config.voice.tts.baseUrl,
-          timeoutMs: config.voice.tts.timeoutMs,
-          fetchImpl
+          secretId: config.voice.tts.secretId,
+          secretKey: config.voice.tts.secretKey,
+          baseUrl: "https://tts.tencentcloudapi.com"
         })
-      ]);
-      return { asr, tts };
+      };
     }
   };
 }
 
-// 检查单个本地 provider 的 /health endpoint.
-async function checkProvider(input: {
+// 判断单个腾讯云 provider 是否已具备可调用条件.
+function checkTencentProvider(input: {
   enabled: boolean;
-  provider: VoiceProviderStatusDto["provider"];
+  secretId: string;
+  secretKey: string;
   baseUrl: string;
-  timeoutMs: number;
-  fetchImpl: typeof fetch;
-}): Promise<VoiceProviderStatusDto> {
+}): VoiceProviderStatusDto {
   if (!input.enabled) {
     return {
-      provider: input.provider,
+      provider: "tencent-cloud",
       status: "disabled",
       baseUrl: input.baseUrl,
       message: "disabled"
     };
   }
-
-  try {
-    const response = await input.fetchImpl(`${input.baseUrl}/health`, {
-      method: "GET",
-      signal: AbortSignal.timeout(input.timeoutMs)
-    });
-    if (response.ok) {
-      return {
-        provider: input.provider,
-        status: "ready",
-        baseUrl: input.baseUrl,
-        message: "ready"
-      };
-    }
+  if (!input.secretId || !input.secretKey) {
     return {
-      provider: input.provider,
+      provider: "tencent-cloud",
       status: "unreachable",
       baseUrl: input.baseUrl,
-      message: `health check failed: ${response.status}`
-    };
-  } catch {
-    return {
-      provider: input.provider,
-      status: "unreachable",
-      baseUrl: input.baseUrl,
-      message: "health check unreachable"
+      message: "missing Tencent Cloud credentials"
     };
   }
+  return {
+    provider: "tencent-cloud",
+    status: "ready",
+    baseUrl: input.baseUrl,
+    message: "configured"
+  };
 }

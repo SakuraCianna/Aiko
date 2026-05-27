@@ -16,7 +16,7 @@ export type AikoSpeechControllerOptions = {
   AudioCtor?: typeof Audio;
 };
 
-// 创建 Aiko 语音输出控制器, 优先使用本地 CosyVoice, 失败时退回浏览器 Web Speech.
+// 创建 Aiko 语音输出控制器, 优先使用腾讯云 TTS, 失败时退回浏览器 Web Speech.
 export function createAikoSpeechController(options: AikoSpeechControllerOptions = {}): AikoSpeechController {
   const synth = options.synth ?? window.speechSynthesis;
   const synthesizeSpeech = options.synthesizeSpeech ?? window.aiko?.synthesizeSpeech;
@@ -31,7 +31,7 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
 
       stopAudio();
       synth?.cancel();
-      const remoteStarted = await speakWithCosyVoice(speechText, speakOptions);
+      const remoteStarted = await speakWithCloudTts(speechText, speakOptions);
       if (remoteStarted) return true;
       return speakWithWebSpeech(speechText, synth, speakOptions);
     },
@@ -48,8 +48,8 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
     }
   };
 
-  // 通过主进程调用本地 CosyVoice 服务并播放返回音频.
-  async function speakWithCosyVoice(text: string, speakOptions?: SpeakOptions) {
+  // 通过主进程调用云端 TTS 服务并播放返回音频.
+  async function speakWithCloudTts(text: string, speakOptions?: SpeakOptions) {
     if (!synthesizeSpeech) return false;
     try {
       const response = await synthesizeSpeech({ text, emotion: "neutral", speed: 1 });

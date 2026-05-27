@@ -8,14 +8,14 @@ describe("createVoiceHealthService", () => {
     const service = createVoiceHealthService(baseConfig(), fetchMock);
 
     await expect(service.snapshot()).resolves.toMatchObject({
-      asr: { provider: "faster-whisper", status: "disabled" },
-      tts: { provider: "cosyvoice", status: "disabled" }
+      asr: { provider: "tencent-cloud", status: "disabled" },
+      tts: { provider: "tencent-cloud", status: "disabled" }
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("reports ready when enabled local services answer /health", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true })) as unknown as typeof fetch;
+  it("reports ready when Tencent Cloud providers have credentials", async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch;
     const config = baseConfig({
       asrEnabled: true,
       ttsEnabled: true
@@ -23,18 +23,15 @@ describe("createVoiceHealthService", () => {
     const service = createVoiceHealthService(config, fetchMock);
 
     await expect(service.snapshot()).resolves.toMatchObject({
-      asr: { provider: "faster-whisper", status: "ready" },
-      tts: { provider: "cosyvoice", status: "ready" }
+      asr: { provider: "tencent-cloud", status: "ready" },
+      tts: { provider: "tencent-cloud", status: "ready" }
     });
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9001/health", expect.objectContaining({ method: "GET" }));
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9002/health", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("reports unreachable when a configured local service fails", async () => {
-    const fetchMock = vi.fn(async () => {
-      throw new Error("ECONNREFUSED");
-    }) as unknown as typeof fetch;
-    const service = createVoiceHealthService(baseConfig({ asrEnabled: true, ttsEnabled: true }), fetchMock);
+  it("reports unreachable when enabled Tencent Cloud providers miss credentials", async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch;
+    const service = createVoiceHealthService(baseConfig({ asrEnabled: true, ttsEnabled: true, emptyCredentials: true }), fetchMock);
 
     await expect(service.snapshot()).resolves.toMatchObject({
       asr: { status: "unreachable" },
@@ -43,7 +40,9 @@ describe("createVoiceHealthService", () => {
   });
 });
 
-function baseConfig(options: { asrEnabled?: boolean; ttsEnabled?: boolean } = {}): AppConfig {
+function baseConfig(options: { asrEnabled?: boolean; ttsEnabled?: boolean; emptyCredentials?: boolean } = {}): AppConfig {
+  const secretId = options.emptyCredentials ? "" : "akid-test";
+  const secretKey = options.emptyCredentials ? "" : "secret-test";
   return {
     glm: {
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
@@ -66,17 +65,25 @@ function baseConfig(options: { asrEnabled?: boolean; ttsEnabled?: boolean } = {}
     voice: {
       asr: {
         enabled: options.asrEnabled ?? false,
-        provider: "faster-whisper",
-        baseUrl: "http://127.0.0.1:9001",
+        provider: "tencent-cloud",
+        secretId,
+        secretKey,
+        region: "ap-shanghai",
+        engineModelType: "16k_zh",
+        voiceFormat: "wav",
         language: "zh",
         timeoutMs: 30000
       },
       tts: {
         enabled: options.ttsEnabled ?? false,
-        provider: "cosyvoice",
-        baseUrl: "http://127.0.0.1:9002",
-        voice: "aiko",
+        provider: "tencent-cloud",
+        secretId,
+        secretKey,
+        region: "ap-shanghai",
+        voiceType: 603007,
+        voiceName: "邻家女孩",
         format: "wav",
+        sampleRate: 24000,
         timeoutMs: 30000
       }
     }

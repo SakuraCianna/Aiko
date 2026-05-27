@@ -23,15 +23,15 @@ export function SettingsPanel() {
       </label>
       <label>
         语音输入
-        <input value="录音附件优先, 由主进程 faster-whisper provider 转写" readOnly />
+        <input value="录音附件优先, 由主进程腾讯云 ASR 转写" readOnly />
       </label>
       <label>
         语音输出
-        <input value="CosyVoice 优先, 不可用时回退 Web Speech" readOnly />
+        <input value="腾讯云超自然大模型音色优先, 不可用时回退 Web Speech" readOnly />
       </label>
       <div className="voice-status">
-        <VoiceStatusLine label="ASR" status={voiceStatus?.asr} fallbackProvider="faster-whisper" />
-        <VoiceStatusLine label="TTS" status={voiceStatus?.tts} fallbackProvider="cosyvoice" />
+        <VoiceStatusLine label="ASR" status={voiceStatus?.asr} fallbackProvider="tencent-cloud" />
+        <VoiceStatusLine label="TTS" status={voiceStatus?.tts} fallbackProvider="tencent-cloud" />
       </div>
     </section>
   );
@@ -61,7 +61,7 @@ function VoiceStatusLine({
 // 把 provider 状态转换成简短中文提示.
 function formatStatus(status?: VoiceProviderStatusDto) {
   if (!status) return "检测中";
-  if (status.status === "ready") return "已连接";
+  if (status.status === "ready") return "已配置";
   if (status.status === "disabled") return "未启用";
   return "未连接";
 }

@@ -9,7 +9,7 @@ import {
   type ChatAttachment,
   type ChatPayload
 } from "../../shared/chatPayload";
-import { createAudioAttachmentFromBlob, selectSupportedAudioMimeType } from "../audio/microphoneRecorder";
+import { createAudioAttachmentFromBlob, createWavAudioRecorder, type WavAudioRecorder } from "../audio/microphoneRecorder";
 
 type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;
@@ -22,8 +22,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const [error, setError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recordingChunksRef = useRef<Blob[]>([]);
+  const recorderRef = useRef<WavAudioRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
@@ -93,17 +92,12 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     appendAttachments(nextAttachments);
   }
 
-  // 切换语音输入, 默认录音为音频附件, 再交给主进程 faster-whisper provider 理解.
+  // 切换语音输入, 默认录音为 WAV 附件, 再交给主进程腾讯云 ASR 理解.
   async function toggleVoiceInput() {
     setError("");
 
     if (recordingSessionRef.current) {
-      const recorder = recorderRef.current;
-      if (recorder && recorder.state !== "inactive") {
-        recorder.stop();
-      } else {
-        cleanupRecording();
-      }
+      void finishRecording(recordingSessionRef.current);
       return;
     }
 
@@ -117,7 +111,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!navigator.mediaDevices?.getUserMedia) {
       setError("当前环境无法调用麦克风录音.");
       return;
     }
@@ -133,27 +127,14 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
         return;
       }
 
-      const mimeType = selectSupportedAudioMimeType((candidate) => MediaRecorder.isTypeSupported(candidate));
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-
-      recordingChunksRef.current = [];
       streamRef.current = stream;
+      const recorder = await createWavAudioRecorder(stream);
+      if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
+        void recorder.stop();
+        stopMicrophoneStream();
+        return;
+      }
       recorderRef.current = recorder;
-
-      recorder.addEventListener("dataavailable", (event) => {
-        if (recordingSessionRef.current !== sessionId) return;
-        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
-      });
-
-      recorder.addEventListener(
-        "stop",
-        () => {
-          void finishRecording(sessionId);
-        },
-        { once: true }
-      );
-
-      recorder.start();
     } catch {
       if (recordingSessionRef.current !== sessionId) return;
       cleanupRecording();
@@ -165,22 +146,20 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   async function finishRecording(sessionId: string) {
     if (recordingSessionRef.current !== sessionId) return;
 
-    const chunks = recordingChunksRef.current;
-    const mimeType = recorderRef.current?.mimeType || "audio/webm";
+    const recorder = recorderRef.current;
     recordingSessionRef.current = null;
     recorderRef.current = null;
-    recordingChunksRef.current = [];
     stopMicrophoneStream();
     if (mountedRef.current) setIsRecording(false);
 
     if (!mountedRef.current) return;
 
-    if (chunks.length === 0) {
+    if (!recorder) {
       setError("没有录到有效语音.");
       return;
     }
 
-    const blob = new Blob(chunks, { type: mimeType });
+    const blob = await recorder.stop();
     if (blob.size > MAX_AUDIO_BYTES) {
       setError("单段语音不能超过 15 MB.");
       return;
@@ -213,8 +192,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     recordingSessionRef.current = null;
     const recorder = recorderRef.current;
     recorderRef.current = null;
-    recordingChunksRef.current = [];
-    if (recorder && recorder.state !== "inactive") recorder.stop();
+    if (recorder) void recorder.stop();
     stopMicrophoneStream();
     if (mountedRef.current) setIsRecording(false);
   }

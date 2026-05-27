@@ -6,8 +6,8 @@ describe("SettingsPanel", () => {
     const settingsPanel = readFileSync("src/renderer/components/SettingsPanel.tsx", "utf8");
 
     expect(settingsPanel).toContain("getVoiceStatus");
-    expect(settingsPanel).toContain("faster-whisper");
-    expect(settingsPanel).toContain("CosyVoice");
+    expect(settingsPanel).toContain("tencent-cloud");
+    expect(settingsPanel).toContain("腾讯云");
     expect(settingsPanel).toContain("voice-status");
     expect(readFileSync("src/renderer/styles.css", "utf8")).toContain(".voice-status-row");
   });

@@ -76,7 +76,7 @@ export type SynthesizeSpeechResponseDto =
     };
 
 export type VoiceProviderStatusDto = {
-  provider: "faster-whisper" | "cosyvoice";
+  provider: "tencent-cloud";
   status: "disabled" | "ready" | "unreachable";
   baseUrl: string;
   message: string;

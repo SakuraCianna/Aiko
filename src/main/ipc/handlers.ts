@@ -179,15 +179,15 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     if (!deps.voiceHealthService) {
       return {
         asr: {
-          provider: "faster-whisper",
+          provider: "tencent-cloud",
           status: "disabled",
-          baseUrl: "",
+          baseUrl: "https://asr.tencentcloudapi.com",
           message: "voice health service is not configured"
         },
         tts: {
-          provider: "cosyvoice",
+          provider: "tencent-cloud",
           status: "disabled",
-          baseUrl: "",
+          baseUrl: "https://tts.tencentcloudapi.com",
           message: "voice health service is not configured"
         }
       };

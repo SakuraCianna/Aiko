@@ -25,17 +25,25 @@ describe("parseEnv", () => {
     expect(config.voice).toEqual({
       asr: {
         enabled: false,
-        provider: "faster-whisper",
-        baseUrl: "http://127.0.0.1:9001",
+        provider: "tencent-cloud",
+        secretId: "",
+        secretKey: "",
+        region: "ap-shanghai",
+        engineModelType: "16k_zh",
+        voiceFormat: "wav",
         language: "zh",
         timeoutMs: 30000
       },
       tts: {
         enabled: false,
-        provider: "cosyvoice",
-        baseUrl: "http://127.0.0.1:9002",
-        voice: "aiko",
+        provider: "tencent-cloud",
+        secretId: "",
+        secretKey: "",
+        region: "ap-shanghai",
+        voiceType: 603007,
+        voiceName: "邻家女孩",
         format: "wav",
+        sampleRate: 24000,
         timeoutMs: 30000
       }
     });
@@ -136,36 +144,60 @@ describe("parseEnv", () => {
     ).toThrow("Invalid MCP_TAVILY_REMOTE_URL");
   });
 
-  it("parses faster-whisper ASR and CosyVoice TTS config", () => {
+  it("parses Tencent Cloud ASR and TTS config", () => {
     const config = parseEnv({
       GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
       GLM_MODEL: "glm-4.6v-flash",
       GLM_API_KEY: "secret-value",
       AIKO_ASR_ENABLED: "true",
-      AIKO_ASR_BASE_URL: "http://127.0.0.1:9011/",
+      TENCENTCLOUD_SECRET_ID: "akid-test",
+      TENCENTCLOUD_SECRET_KEY: "secret-test",
+      TENCENTCLOUD_REGION: "ap-guangzhou",
+      AIKO_ASR_ENGINE_MODEL_TYPE: "16k_zh",
+      AIKO_ASR_VOICE_FORMAT: "wav",
       AIKO_ASR_LANGUAGE: "zh-CN",
       AIKO_ASR_TIMEOUT_MS: "45000",
       AIKO_TTS_ENABLED: "true",
-      AIKO_TTS_BASE_URL: "http://127.0.0.1:9022/",
-      AIKO_TTS_VOICE: "aiko-zero-shot",
+      AIKO_TTS_VOICE_TYPE: "603007",
+      AIKO_TTS_VOICE_NAME: "邻家女孩",
       AIKO_TTS_FORMAT: "wav",
+      AIKO_TTS_SAMPLE_RATE: "24000",
       AIKO_TTS_TIMEOUT_MS: "50000"
     });
 
     expect(config.voice.asr).toEqual({
       enabled: true,
-      provider: "faster-whisper",
-      baseUrl: "http://127.0.0.1:9011",
+      provider: "tencent-cloud",
+      secretId: "akid-test",
+      secretKey: "secret-test",
+      region: "ap-guangzhou",
+      engineModelType: "16k_zh",
+      voiceFormat: "wav",
       language: "zh-CN",
       timeoutMs: 45000
     });
     expect(config.voice.tts).toEqual({
       enabled: true,
-      provider: "cosyvoice",
-      baseUrl: "http://127.0.0.1:9022",
-      voice: "aiko-zero-shot",
+      provider: "tencent-cloud",
+      secretId: "akid-test",
+      secretKey: "secret-test",
+      region: "ap-guangzhou",
+      voiceType: 603007,
+      voiceName: "邻家女孩",
       format: "wav",
+      sampleRate: 24000,
       timeoutMs: 50000
     });
+  });
+
+  it("requires Tencent Cloud credentials only when a cloud voice provider is enabled", () => {
+    expect(() =>
+      parseEnv({
+        GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
+        GLM_MODEL: "glm-4.6v-flash",
+        GLM_API_KEY: "secret-value",
+        AIKO_ASR_ENABLED: "true"
+      })
+    ).toThrow("Missing required environment variable: TENCENTCLOUD_SECRET_ID or TENCENTCLOUD_SECRET_KEY");
   });
 });

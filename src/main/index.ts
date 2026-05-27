@@ -21,8 +21,8 @@ import {
 } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
-import { createCosyVoiceSpeechSynthesisProvider } from "./voice/cosyVoiceProvider";
-import { createFasterWhisperSpeechUnderstandingProvider } from "./voice/fasterWhisperProvider";
+import { createTencentCloudSpeechUnderstandingProvider } from "./voice/tencentCloudAsrProvider";
+import { createTencentCloudSpeechSynthesisProvider } from "./voice/tencentCloudTtsProvider";
 import { createVoiceHealthService } from "./voice/voiceHealth";
 import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
 import { createPanelWindow } from "./windows/panelWindow";
@@ -51,10 +51,10 @@ void app.whenReady().then(() => {
   const commitmentService = createAikoCommitmentService();
   const hooks = createAikoRuntimeHooks();
   const speechUnderstandingProvider = config.voice.asr.enabled
-    ? createFasterWhisperSpeechUnderstandingProvider(config.voice.asr)
+    ? createTencentCloudSpeechUnderstandingProvider(config.voice.asr)
     : undefined;
   const speechSynthesisProvider = config.voice.tts.enabled
-    ? createCosyVoiceSpeechSynthesisProvider(config.voice.tts)
+    ? createTencentCloudSpeechSynthesisProvider(config.voice.tts)
     : undefined;
   const voiceHealthService = createVoiceHealthService(config);
   stopAgentStatusForwarder = attachAikoAgentStatusForwarder([petWindow, panelWindow], hooks);

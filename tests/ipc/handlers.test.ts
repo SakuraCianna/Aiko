@@ -154,15 +154,15 @@ describe("registerAikoHandlers pending action approvals", () => {
         async snapshot() {
           return {
             asr: {
-              provider: "faster-whisper",
+              provider: "tencent-cloud",
               status: "ready",
-              baseUrl: "http://127.0.0.1:9001",
+              baseUrl: "https://asr.tencentcloudapi.com",
               message: "ready"
             },
             tts: {
-              provider: "cosyvoice",
+              provider: "tencent-cloud",
               status: "disabled",
-              baseUrl: "http://127.0.0.1:9002",
+              baseUrl: "https://tts.tencentcloudapi.com",
               message: "disabled"
             }
           };
@@ -171,8 +171,8 @@ describe("registerAikoHandlers pending action approvals", () => {
     });
 
     await expect(callHandler("voice:status")).resolves.toMatchObject({
-      asr: { provider: "faster-whisper", status: "ready" },
-      tts: { provider: "cosyvoice", status: "disabled" }
+      asr: { provider: "tencent-cloud", status: "ready" },
+      tts: { provider: "tencent-cloud", status: "disabled" }
     });
   });
 });
