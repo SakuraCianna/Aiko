@@ -12,6 +12,7 @@ import { openApplication, type ApplicationConfig } from "../capabilities/openApp
 import { openUrl } from "../capabilities/openUrl";
 import { createPowerShellCommandRunner } from "../capabilities/shellCommand";
 import { createDesktopMarkdownWriter } from "../capabilities/writeDesktopMarkdown";
+import type { SpeechSynthesisProvider } from "../voice/voiceTypes";
 import type {
   ApplicationPreferenceRepository,
   MemoryRepository,
@@ -25,7 +26,9 @@ import type {
   ExecuteActionRequest,
   PanelName,
   PendingActionDto,
-  ReminderStatusDto
+  ReminderStatusDto,
+  SynthesizeSpeechRequestDto,
+  SynthesizeSpeechResponseDto
 } from "../../shared/ipcTypes";
 
 export type AikoHandlerDeps = {
@@ -39,6 +42,7 @@ export type AikoHandlerDeps = {
   reminderRepository?: Pick<ReminderRepository, "save" | "list" | "updateStatus" | "delete" | "cancelLatestActive">;
   applicationPreferenceRepository?: Pick<ApplicationPreferenceRepository, "setDefaultApplication" | "getDefaultApplication">;
   applicationProvider?: () => ApplicationConfig[];
+  speechSynthesisProvider?: SpeechSynthesisProvider;
 };
 
 type PendingActionEntry = {
@@ -154,6 +158,19 @@ export function registerAikoHandlers(deps: AikoHandlerDeps) {
     controller.abort();
     streamControllers.delete(requestId);
     return { ok: true, message: "已中止当前回复." };
+  });
+
+  ipcMain.handle("voice:synthesize", async (_event, input: unknown): Promise<SynthesizeSpeechResponseDto> => {
+    const request = parseSynthesizeSpeechRequest(input);
+    if (!request) return { ok: false, message: "Invalid speech synthesis request" };
+    if (!deps.speechSynthesisProvider) return { ok: false, message: "TTS provider is not configured" };
+    return deps.speechSynthesisProvider.synthesize({
+      text: request.text,
+      emotion: request.emotion,
+      voiceProfileId: request.voiceProfileId,
+      speed: request.speed,
+      format: "wav"
+    });
   });
 
   ipcMain.handle("action:execute", async (_event, request: unknown) => {
@@ -507,6 +524,22 @@ function parseChatPayload(input: unknown): ChatPayload | null {
   } catch {
     return null;
   }
+}
+
+// 校验 renderer 发起的语音合成请求, 防止过长文本直接进入本地 TTS 服务.
+function parseSynthesizeSpeechRequest(input: unknown): SynthesizeSpeechRequestDto | null {
+  if (!input || typeof input !== "object") return null;
+  const request = input as SynthesizeSpeechRequestDto;
+  if (typeof request.text !== "string" || request.text.trim().length === 0 || request.text.length > 4000) return null;
+  if (request.emotion !== undefined && !["neutral", "happy", "serious", "comfort", "notice"].includes(request.emotion)) return null;
+  if (request.voiceProfileId !== undefined && (typeof request.voiceProfileId !== "string" || request.voiceProfileId.length > 120)) return null;
+  if (request.speed !== undefined && (typeof request.speed !== "number" || !Number.isFinite(request.speed) || request.speed <= 0 || request.speed > 2)) return null;
+  return {
+    text: request.text.trim(),
+    emotion: request.emotion,
+    voiceProfileId: request.voiceProfileId,
+    speed: request.speed
+  };
 }
 
 // 发送流式增量前检查 WebContents 生命周期, 避免窗口关闭后继续投递 IPC.

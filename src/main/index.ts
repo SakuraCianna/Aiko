@@ -21,6 +21,8 @@ import {
 } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
+import { createCosyVoiceSpeechSynthesisProvider } from "./voice/cosyVoiceProvider";
+import { createFasterWhisperSpeechUnderstandingProvider } from "./voice/fasterWhisperProvider";
 import { createAikoTraceRecorder } from "./agent/trace/aikoTrace";
 import { createPanelWindow } from "./windows/panelWindow";
 import { createPetWindow, loadRenderer } from "./windows/petWindow";
@@ -47,10 +49,17 @@ void app.whenReady().then(() => {
   const workflowCheckpointer = createSqliteCheckpointSaver(database.db);
   const commitmentService = createAikoCommitmentService();
   const hooks = createAikoRuntimeHooks();
+  const speechUnderstandingProvider = config.voice.asr.enabled
+    ? createFasterWhisperSpeechUnderstandingProvider(config.voice.asr)
+    : undefined;
+  const speechSynthesisProvider = config.voice.tts.enabled
+    ? createCosyVoiceSpeechSynthesisProvider(config.voice.tts)
+    : undefined;
   stopAgentStatusForwarder = attachAikoAgentStatusForwarder([petWindow, panelWindow], hooks);
   const agentRuntime = createAikoAgentRuntime({
     config,
     memoryRuntime: memoryRepository,
+    speechUnderstandingProvider,
     actionJournal,
     traceRecorder,
     workflowCheckpointer,
@@ -74,7 +83,8 @@ void app.whenReady().then(() => {
     memoryRepository,
     permissionRepository,
     reminderRepository,
-    applicationPreferenceRepository
+    applicationPreferenceRepository,
+    speechSynthesisProvider
   });
   stopCommitmentHeartbeat = startCommitmentHeartbeat([petWindow, panelWindow], commitmentService);
 });

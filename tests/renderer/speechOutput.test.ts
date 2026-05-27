@@ -13,6 +13,8 @@ describe("speechOutput", () => {
 
     expect(app).toContain("createAikoSpeechController");
     expect(app).toContain("speakAiko(response.message");
+    expect(speechOutput).toContain("synthesizeSpeech");
+    expect(speechOutput).toContain("new Audio");
     expect(speechOutput).toContain("SpeechSynthesisUtterance");
     expect(speechOutput).toContain("zh-CN");
   });

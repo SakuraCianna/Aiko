@@ -276,12 +276,24 @@ export function App() {
     });
 
     if (!started) {
+      scheduleSpeechFallback(afterSpeech);
+      return;
+    }
+
+    void started
+      .then((didStart) => {
+        if (!didStart) scheduleSpeechFallback(afterSpeech);
+      })
+      .catch(() => scheduleSpeechFallback(afterSpeech));
+  }
+
+  // 语音不可用时仍然让角色短暂停留在说话动作, 避免 UI 直接僵住.
+  function scheduleSpeechFallback(afterSpeech: CharacterBehavior) {
       clearCharacterIdleTimer();
       characterIdleTimerRef.current = window.setTimeout(() => {
         setCharacterBehavior(afterSpeech);
         characterIdleTimerRef.current = null;
       }, 1200);
-    }
   }
 
   // 显示输入控件并取消隐藏计时器.

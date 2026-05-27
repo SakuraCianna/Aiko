@@ -19,6 +19,23 @@ export type AppConfig = {
       timeoutMs: number;
     };
   };
+  voice: {
+    asr: {
+      enabled: boolean;
+      provider: "faster-whisper";
+      baseUrl: string;
+      language: string;
+      timeoutMs: number;
+    };
+    tts: {
+      enabled: boolean;
+      provider: "cosyvoice";
+      baseUrl: string;
+      voice: string;
+      format: "wav" | "mp3";
+      timeoutMs: number;
+    };
+  };
 };
 
 const DEFAULT_GLM_FALLBACK_MODELS = ["glm-4v-flash"];
@@ -26,6 +43,8 @@ const DEFAULT_TAVILY_MCP_PACKAGE = "tavily-mcp@0.2.19";
 const DEFAULT_TAVILY_REMOTE_URL = "https://mcp.tavily.com/mcp/";
 const DEFAULT_TAVILY_MAX_RESULTS = 5;
 const DEFAULT_TAVILY_TIMEOUT_MS = 15000;
+const DEFAULT_ASR_BASE_URL = "http://127.0.0.1:9001";
+const DEFAULT_TTS_BASE_URL = "http://127.0.0.1:9002";
 const ALLOWED_TAVILY_MCP_PACKAGES = new Set([DEFAULT_TAVILY_MCP_PACKAGE]);
 const ALLOWED_TAVILY_REMOTE_HOSTS = new Set(["mcp.tavily.com"]);
 
@@ -36,6 +55,7 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
   const fallbackModels = readFallbackModels(env, model);
   const apiKey = readRequired(env, "GLM_API_KEY");
   const tavily = readTavilyMcpConfig(env);
+  const voice = readVoiceConfig(env);
 
   return {
     glm: {
@@ -46,7 +66,8 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
     },
     mcp: {
       tavily
-    }
+    },
+    voice
   };
 }
 
@@ -100,6 +121,27 @@ function readTavilyMcpConfig(env: NodeJS.ProcessEnv): AppConfig["mcp"]["tavily"]
     packageName: readTavilyPackageName(env.MCP_TAVILY_PACKAGE),
     maxResults: readPositiveInteger(env, "MCP_TAVILY_MAX_RESULTS", DEFAULT_TAVILY_MAX_RESULTS),
     timeoutMs: readPositiveInteger(env, "MCP_TAVILY_TIMEOUT_MS", DEFAULT_TAVILY_TIMEOUT_MS)
+  };
+}
+
+// 读取本地语音配置, 默认保留关闭状态, 避免未启动本地服务时影响桌宠启动.
+function readVoiceConfig(env: NodeJS.ProcessEnv): AppConfig["voice"] {
+  return {
+    asr: {
+      enabled: readBoolean(env, "AIKO_ASR_ENABLED", false),
+      provider: readAsrProvider(env.AIKO_ASR_PROVIDER),
+      baseUrl: readLocalHttpUrl(env.AIKO_ASR_BASE_URL, DEFAULT_ASR_BASE_URL, "AIKO_ASR_BASE_URL"),
+      language: readOptional(env, "AIKO_ASR_LANGUAGE") || "zh",
+      timeoutMs: readPositiveInteger(env, "AIKO_ASR_TIMEOUT_MS", 30000)
+    },
+    tts: {
+      enabled: readBoolean(env, "AIKO_TTS_ENABLED", false),
+      provider: readTtsProvider(env.AIKO_TTS_PROVIDER),
+      baseUrl: readLocalHttpUrl(env.AIKO_TTS_BASE_URL, DEFAULT_TTS_BASE_URL, "AIKO_TTS_BASE_URL"),
+      voice: readOptional(env, "AIKO_TTS_VOICE") || "aiko",
+      format: readTtsFormat(env.AIKO_TTS_FORMAT),
+      timeoutMs: readPositiveInteger(env, "AIKO_TTS_TIMEOUT_MS", 30000)
+    }
   };
 }
 
@@ -170,6 +212,38 @@ function readTavilyRemoteUrl(value: string | undefined): string {
     throw new Error("Invalid MCP_TAVILY_REMOTE_URL, only approved Tavily HTTPS hosts are allowed");
   }
   return parsed.toString();
+}
+
+// 语音服务第一阶段只允许 faster-whisper, 防止配置漂移到未实现 provider.
+function readAsrProvider(value: string | undefined): "faster-whisper" {
+  const provider = value?.trim().toLowerCase() || "faster-whisper";
+  if (provider === "faster-whisper") return provider;
+  throw new Error("Invalid AIKO_ASR_PROVIDER, expected faster-whisper");
+}
+
+// TTS 第一阶段固定 CosyVoice, 后续可在此扩展 GPT-SoVITS 等高质量 provider.
+function readTtsProvider(value: string | undefined): "cosyvoice" {
+  const provider = value?.trim().toLowerCase() || "cosyvoice";
+  if (provider === "cosyvoice") return provider;
+  throw new Error("Invalid AIKO_TTS_PROVIDER, expected cosyvoice");
+}
+
+// 限制本地语音服务 URL, 避免 renderer 文本被发送到任意远端主机.
+function readLocalHttpUrl(value: string | undefined, fallback: string, name: string): string {
+  const raw = readOptional({ [name]: value }, name) || fallback;
+  const parsed = new URL(raw);
+  const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !localHosts.has(parsed.hostname)) {
+    throw new Error(`Invalid ${name}, only local speech service URLs are allowed`);
+  }
+  return parsed.toString().replace(/\/$/, "");
+}
+
+// 读取 TTS 输出格式, 当前只接 wav 和 mp3.
+function readTtsFormat(value: string | undefined): "wav" | "mp3" {
+  const format = value?.trim().toLowerCase() || "wav";
+  if (format === "wav" || format === "mp3") return format;
+  throw new Error("Invalid AIKO_TTS_FORMAT, expected wav or mp3");
 }
 
 // 读取正整数配置, 避免超时和结果数量被配置成不可用值.

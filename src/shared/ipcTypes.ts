@@ -57,6 +57,24 @@ export type ChatStreamDelta = {
   text: string;
 };
 
+export type SynthesizeSpeechRequestDto = {
+  text: string;
+  emotion?: "neutral" | "happy" | "serious" | "comfort" | "notice";
+  voiceProfileId?: string;
+  speed?: number;
+};
+
+export type SynthesizeSpeechResponseDto =
+  | {
+      ok: true;
+      dataUrl: string;
+      mimeType: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
 export type AikoAgentStatusPhase =
   | "accepted"
   | "running"
@@ -224,6 +242,7 @@ export type AikoApi = {
   sendMessage: (payload: ChatPayload) => Promise<ChatResponse>;
   streamMessage: (requestId: string, payload: ChatPayload) => Promise<ChatResponse>;
   cancelStream: (requestId: string) => Promise<{ ok: boolean; message: string }>;
+  synthesizeSpeech: (request: SynthesizeSpeechRequestDto) => Promise<SynthesizeSpeechResponseDto>;
   onChatStreamDelta: (listener: (delta: ChatStreamDelta) => void) => () => void;
   onAgentStatus: (listener: (event: AikoAgentStatusEventDto) => void) => () => void;
   onProactiveMessage: (listener: (message: AikoProactiveMessage) => void) => () => void;

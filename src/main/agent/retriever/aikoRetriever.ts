@@ -110,7 +110,7 @@ export async function understandSpeech(
   }
 }
 
-// 创建尚未接入真实 ASR 时的占位语音理解 provider.
+// 创建未启用 ASR provider 时的占位语音理解 provider.
 export function createPendingSpeechUnderstandingProvider(): SpeechUnderstandingProvider {
   return {
     // 返回每个音频附件的未配置提示.

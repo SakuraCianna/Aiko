@@ -16,6 +16,8 @@ const api: AikoApi = {
   streamMessage: (requestId, payload) => ipcRenderer.invoke("chat:stream-message", requestId, payload),
   // 取消指定流式聊天请求.
   cancelStream: (requestId) => ipcRenderer.invoke("chat:cancel-stream", requestId),
+  // 调用主进程本地 TTS provider, 成功时返回可播放的音频 data URL.
+  synthesizeSpeech: (request) => ipcRenderer.invoke("voice:synthesize", request),
   // 订阅聊天流式增量事件.
   onChatStreamDelta: (listener) => {
     // 把主进程流式消息转成渲染层回调.

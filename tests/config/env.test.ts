@@ -22,6 +22,23 @@ describe("parseEnv", () => {
       maxResults: 5,
       timeoutMs: 15000
     });
+    expect(config.voice).toEqual({
+      asr: {
+        enabled: false,
+        provider: "faster-whisper",
+        baseUrl: "http://127.0.0.1:9001",
+        language: "zh",
+        timeoutMs: 30000
+      },
+      tts: {
+        enabled: false,
+        provider: "cosyvoice",
+        baseUrl: "http://127.0.0.1:9002",
+        voice: "aiko",
+        format: "wav",
+        timeoutMs: 30000
+      }
+    });
   });
 
   it("parses optional GLM fallback model route without duplicates", () => {
@@ -117,5 +134,38 @@ describe("parseEnv", () => {
         MCP_TAVILY_REMOTE_URL: "https://example.com/mcp"
       })
     ).toThrow("Invalid MCP_TAVILY_REMOTE_URL");
+  });
+
+  it("parses faster-whisper ASR and CosyVoice TTS config", () => {
+    const config = parseEnv({
+      GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
+      GLM_MODEL: "glm-4.6v-flash",
+      GLM_API_KEY: "secret-value",
+      AIKO_ASR_ENABLED: "true",
+      AIKO_ASR_BASE_URL: "http://127.0.0.1:9011/",
+      AIKO_ASR_LANGUAGE: "zh-CN",
+      AIKO_ASR_TIMEOUT_MS: "45000",
+      AIKO_TTS_ENABLED: "true",
+      AIKO_TTS_BASE_URL: "http://127.0.0.1:9022/",
+      AIKO_TTS_VOICE: "aiko-zero-shot",
+      AIKO_TTS_FORMAT: "wav",
+      AIKO_TTS_TIMEOUT_MS: "50000"
+    });
+
+    expect(config.voice.asr).toEqual({
+      enabled: true,
+      provider: "faster-whisper",
+      baseUrl: "http://127.0.0.1:9011",
+      language: "zh-CN",
+      timeoutMs: 45000
+    });
+    expect(config.voice.tts).toEqual({
+      enabled: true,
+      provider: "cosyvoice",
+      baseUrl: "http://127.0.0.1:9022",
+      voice: "aiko-zero-shot",
+      format: "wav",
+      timeoutMs: 50000
+    });
   });
 });

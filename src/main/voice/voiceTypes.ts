@@ -27,6 +27,29 @@ export type VoiceProvider = {
   cancel: () => void;
 };
 
+export type SpeechSynthesisInput = {
+  text: string;
+  voiceProfileId?: string;
+  emotion?: VoiceEmotion;
+  speed?: number;
+  format?: "wav" | "mp3";
+};
+
+export type SpeechSynthesisResult =
+  | {
+      ok: true;
+      dataUrl: string;
+      mimeType: string;
+    }
+  | {
+      ok: false;
+      message: string;
+    };
+
+export type SpeechSynthesisProvider = {
+  synthesize: (input: SpeechSynthesisInput) => Promise<SpeechSynthesisResult>;
+};
+
 export type SpeechUnderstandingInput = {
   attachments: ChatAttachment[];
 };

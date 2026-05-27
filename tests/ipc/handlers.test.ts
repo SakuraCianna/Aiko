@@ -101,6 +101,39 @@ describe("registerAikoHandlers pending action approvals", () => {
       workers: []
     });
   });
+
+  it("synthesizes speech through the injected voice provider", async () => {
+    const runtime = createRuntime({
+      response: createBrowserChoiceSourceAction(),
+      resume() {
+        return { ok: true, message: "resumed" };
+      },
+      discard() {
+        return;
+      }
+    });
+    registerAikoHandlers({
+      agentRuntime: runtime,
+      petWindow: fakeWindow(),
+      panelWindow: fakeWindow(),
+      applicationProvider: () => browserApplications(),
+      speechSynthesisProvider: {
+        async synthesize(input) {
+          return {
+            ok: true,
+            dataUrl: `data:audio/wav;base64,${Buffer.from(input.text).toString("base64")}`,
+            mimeType: "audio/wav"
+          };
+        }
+      }
+    });
+
+    await expect(callHandler("voice:synthesize", { text: "你好", emotion: "happy" })).resolves.toEqual({
+      ok: true,
+      dataUrl: "data:audio/wav;base64,5L2g5aW9",
+      mimeType: "audio/wav"
+    });
+  });
 });
 
 function createRuntime(options: {

@@ -10,12 +10,6 @@ import {
   type ChatPayload
 } from "../../shared/chatPayload";
 import { createAudioAttachmentFromBlob, selectSupportedAudioMimeType } from "../audio/microphoneRecorder";
-import {
-  createRealtimeSpeechController,
-  getRealtimeSpeechSupport,
-  normalizeTranscript,
-  type RealtimeSpeechController
-} from "../audio/realtimeSpeech";
 
 type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;
@@ -27,23 +21,17 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [error, setError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const speechControllerRef = useRef<RealtimeSpeechController | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const recordingSessionRef = useRef<string | null>(null);
-  const speechSessionRef = useRef<string | null>(null);
-  const speechFinalTranscriptRef = useRef("");
-  const speechInterimTranscriptRef = useRef("");
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
-      cleanupRealtimeSpeech();
       cleanupRecording();
     };
   }, []);
@@ -105,14 +93,9 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     appendAttachments(nextAttachments);
   }
 
-  // 切换语音输入, 优先实时识别, 不支持时退回录音附件.
+  // 切换语音输入, 默认录音为音频附件, 再交给主进程 faster-whisper provider 理解.
   async function toggleVoiceInput() {
     setError("");
-
-    if (speechSessionRef.current) {
-      stopRealtimeSpeech();
-      return;
-    }
 
     if (recordingSessionRef.current) {
       const recorder = recorderRef.current;
@@ -124,56 +107,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
-    const support = getRealtimeSpeechSupport();
-    if (support.supported) {
-      startRealtimeSpeech();
-      return;
-    }
-
-    setError(`${support.reason} 已切换为录音附件模式.`);
     await toggleAudioAttachmentRecording();
-  }
-
-  // 开始浏览器实时语音识别, 把识别文本直接填入并提交给 Agent.
-  function startRealtimeSpeech() {
-    const sessionId = crypto.randomUUID();
-    const controller = createRealtimeSpeechController({
-      onInterimTranscript: (transcript) => {
-        if (!isActiveSpeechSession(sessionId)) return;
-        speechInterimTranscriptRef.current = normalizeTranscript(transcript);
-        setValue(mergeSpeechTranscript(speechFinalTranscriptRef.current, speechInterimTranscriptRef.current));
-      },
-      onFinalTranscript: (transcript) => {
-        if (!isActiveSpeechSession(sessionId)) return;
-        speechFinalTranscriptRef.current = mergeSpeechTranscript(speechFinalTranscriptRef.current, transcript);
-        speechInterimTranscriptRef.current = "";
-        setValue(speechFinalTranscriptRef.current);
-      },
-      onError: (message) => {
-        if (!isActiveSpeechSession(sessionId)) return;
-        setError(message);
-        cleanupRealtimeSpeech();
-      },
-      onEnd: () => finishRealtimeSpeech(sessionId)
-    });
-
-    if (!controller) {
-      setError("当前环境无法启动实时语音识别.");
-      return;
-    }
-
-    speechSessionRef.current = sessionId;
-    speechControllerRef.current = controller;
-    speechFinalTranscriptRef.current = "";
-    speechInterimTranscriptRef.current = "";
-    setIsListening(true);
-
-    try {
-      controller.start();
-    } catch {
-      cleanupRealtimeSpeech();
-      setError("实时语音识别启动失败, 可以先改用文字输入.");
-    }
   }
 
   // 开始或停止旧版默认麦克风录音附件模式.
@@ -224,42 +158,6 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       if (recordingSessionRef.current !== sessionId) return;
       cleanupRecording();
       if (mountedRef.current) setError("无法访问默认麦克风, 请检查 Windows 麦克风权限.");
-    }
-  }
-
-  // 判断指定实时语音会话是否仍然有效.
-  function isActiveSpeechSession(sessionId: string) {
-    return speechSessionRef.current === sessionId;
-  }
-
-  // 停止实时语音识别, 让浏览器触发 onend 后统一提交.
-  function stopRealtimeSpeech() {
-    const controller = speechControllerRef.current;
-    if (!controller) {
-      cleanupRealtimeSpeech();
-      return;
-    }
-
-    try {
-      controller.stop();
-    } catch {
-      cleanupRealtimeSpeech();
-    }
-  }
-
-  // 实时语音结束后提交最终文本, 没有最终文本时使用最后一次临时文本兜底.
-  function finishRealtimeSpeech(sessionId: string) {
-    if (!isActiveSpeechSession(sessionId)) return;
-
-    const transcript = mergeSpeechTranscript(speechFinalTranscriptRef.current, speechInterimTranscriptRef.current);
-    speechSessionRef.current = null;
-    speechControllerRef.current = null;
-    speechFinalTranscriptRef.current = "";
-    speechInterimTranscriptRef.current = "";
-    if (mountedRef.current) setIsListening(false);
-
-    if (!submitPayload(transcript) && mountedRef.current) {
-      setError("没有识别到有效语音, 可以再说一次.");
     }
   }
 
@@ -321,21 +219,6 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     if (mountedRef.current) setIsRecording(false);
   }
 
-  // 取消实时语音识别并清理临时文本.
-  function cleanupRealtimeSpeech() {
-    speechSessionRef.current = null;
-    speechFinalTranscriptRef.current = "";
-    speechInterimTranscriptRef.current = "";
-    const controller = speechControllerRef.current;
-    speechControllerRef.current = null;
-    try {
-      controller?.abort();
-    } catch {
-      // 语音控制器可能已经被浏览器释放, 清理阶段忽略即可.
-    }
-    if (mountedRef.current) setIsListening(false);
-  }
-
   // 停止麦克风流, 释放系统录音资源.
   function stopMicrophoneStream() {
     if (!streamRef.current) return;
@@ -383,12 +266,12 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
         </button>
         <button
           type="button"
-          className={isListening || isRecording ? "recording-button" : undefined}
-          title={isListening ? "停止实时语音识别" : isRecording ? "停止录音" : "实时语音输入"}
-          aria-pressed={isListening || isRecording}
+          className={isRecording ? "recording-button" : undefined}
+          title={isRecording ? "停止录音" : "语音输入"}
+          aria-pressed={isRecording}
           onClick={() => void toggleVoiceInput()}
         >
-          {isListening || isRecording ? <Square size={15} /> : <Mic size={16} />}
+          {isRecording ? <Square size={15} /> : <Mic size={16} />}
         </button>
         <button type="submit" title="发送">
           <Send size={16} />
@@ -411,9 +294,4 @@ function readAsDataUrl(file: File): Promise<string> {
 // 停止指定媒体流内的所有轨道.
 function stopMediaStream(stream: MediaStream) {
   stream.getTracks().forEach((track) => track.stop());
-}
-
-// 合并实时识别的最终文本和临时文本.
-function mergeSpeechTranscript(...parts: string[]): string {
-  return normalizeTranscript(parts.filter(Boolean).join(" "));
 }

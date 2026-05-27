@@ -8,7 +8,11 @@ export function SettingsPanel() {
       </label>
       <label>
         语音输入
-        <input value="实时语音识别优先,不支持时退回录音附件" readOnly />
+        <input value="录音附件优先, 由主进程 faster-whisper provider 转写" readOnly />
+      </label>
+      <label>
+        语音输出
+        <input value="CosyVoice 优先, 不可用时回退 Web Speech" readOnly />
       </label>
     </section>
   );

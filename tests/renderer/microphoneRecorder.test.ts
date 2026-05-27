@@ -23,12 +23,11 @@ describe("microphoneRecorder", () => {
     expect(commandInput).toContain("cleanupRecording");
   });
 
-  it("prefers realtime speech recognition before falling back to audio attachments", () => {
+  it("uses microphone recording attachments so main-process faster-whisper can transcribe audio", () => {
     const commandInput = readFileSync("src/renderer/components/CommandInput.tsx", "utf8");
 
-    expect(commandInput).toContain("createRealtimeSpeechController");
-    expect(commandInput).toContain("startRealtimeSpeech");
     expect(commandInput).toContain("toggleVoiceInput");
     expect(commandInput).toContain("toggleAudioAttachmentRecording");
+    expect(commandInput).not.toContain("createRealtimeSpeechController");
   });
 });
