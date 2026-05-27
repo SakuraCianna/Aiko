@@ -23,16 +23,31 @@ const DEFAULT_OUTPUT_LIMIT = 12_000;
 const MAX_OUTPUT_LIMIT = 40_000;
 const BLOCKED_COMMAND_PATTERN =
   /\b(Remove-Item|rm|del|erase|rmdir|Format-Volume|Clear-Disk|Remove-Partition|Set-ExecutionPolicy|shutdown|Restart-Computer|Stop-Computer)\b/i;
+const BLOCKED_SHELL_SYNTAX_PATTERN = /[;&|><`]/;
+const SENSITIVE_SHELL_TARGET_PATTERN = /(^|[\\/.\s])(\.env(?:\.\w+)?|\.npmrc|id_rsa|id_ed25519)(?=$|[\\/.\s])/i;
+const READ_ONLY_COMMAND_ALLOWLIST = new Set([
+  "get-childitem",
+  "get-command",
+  "get-item",
+  "get-location",
+  "get-process",
+  "get-service",
+  "resolve-path",
+  "test-path"
+]);
 
 export type ShellCommandValidationResult =
   | { ok: true; request: Required<Pick<ShellCommandRequest, "command" | "timeoutMs" | "outputLimit">> & { cwd?: string } }
-  | { ok: false; reason: "invalid_command" | "blocked_command" | "invalid_timeout" | "invalid_output_limit" };
+  | { ok: false; reason: "invalid_command" | "blocked_command" | "not_allowlisted" | "invalid_timeout" | "invalid_output_limit" };
 
 // 校验模型提出的 PowerShell 命令, 在进入真实系统调用前挡住危险命令.
 export function validateShellCommandRequest(request: ShellCommandRequest): ShellCommandValidationResult {
   const command = request.command.trim();
   if (!command || command.length > MAX_COMMAND_LENGTH) return { ok: false, reason: "invalid_command" };
   if (BLOCKED_COMMAND_PATTERN.test(command)) return { ok: false, reason: "blocked_command" };
+  if (BLOCKED_SHELL_SYNTAX_PATTERN.test(command)) return { ok: false, reason: "blocked_command" };
+  if (SENSITIVE_SHELL_TARGET_PATTERN.test(command)) return { ok: false, reason: "blocked_command" };
+  if (!isAllowlistedReadOnlyCommand(command)) return { ok: false, reason: "not_allowlisted" };
 
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMEOUT_MS) {
@@ -53,6 +68,12 @@ export function validateShellCommandRequest(request: ShellCommandRequest): Shell
       outputLimit
     }
   };
+}
+
+// 只允许明确的只读 PowerShell cmdlet, 避免模型把任意 shell 一行脚本塞进执行器.
+function isAllowlistedReadOnlyCommand(command: string) {
+  const commandName = command.match(/^([A-Za-z][A-Za-z0-9-]*)\b/)?.[1];
+  return Boolean(commandName && READ_ONLY_COMMAND_ALLOWLIST.has(commandName.toLowerCase()));
 }
 
 // 创建受控 PowerShell 运行器, 只执行已经通过校验和用户确认的命令.

@@ -65,6 +65,7 @@ describe("Aiko persona prompt", () => {
     expect(prompt).toContain("propose_restore_file_from_trash");
     expect(prompt).toContain("propose_run_shell_command");
     expect(prompt).toContain("高风险动作");
+    expect(prompt).toContain("只读 allowlist");
   });
 });
 

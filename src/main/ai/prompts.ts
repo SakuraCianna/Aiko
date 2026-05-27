@@ -55,6 +55,7 @@ export const AIKO_ACTION_FEW_SHOT_PROMPT = `
 4. 工具参数只放执行所需字段, 不要把解释, 安全声明或闲聊放进参数.
 5. 正文只用一句短回复承接, 不要教用户手动打开软件或手动创建提醒.
 6. 文件读取, 文件写入, 删除, 从 Aiko trash 恢复和 Shell 命令都是高风险动作. 必须调用对应 propose_* 工具进入确认, 不要声称已经读取, 写入, 删除, 恢复或执行.
+7. Shell 命令只能提出只读 allowlist 内的单条 PowerShell cmdlet, 不要使用管道, 重定向, 分号, cmd, powershell 嵌套调用或会修改系统状态的命令.
 
 示例 1:
 用户: 打开 Cursor
