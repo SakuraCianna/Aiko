@@ -66,8 +66,6 @@ type OpenMeteoForecastResponse = {
     temperature_2m_max?: number[];
     temperature_2m_min?: number[];
     precipitation_sum?: number[];
-    sunrise?: string[];
-    sunset?: string[];
   };
 };
 
@@ -159,7 +157,7 @@ async function queryWeather(
     "current",
     "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m"
   );
-  url.searchParams.set("daily", "temperature_2m_max,temperature_2m_min,precipitation_sum,sunrise,sunset");
+  url.searchParams.set("daily", "temperature_2m_max,temperature_2m_min,precipitation_sum");
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "auto");
 
@@ -187,8 +185,7 @@ async function queryWeather(
       { label: "当前气温", value: `${formatNumber(current.temperature_2m)}°C` },
       { label: "体感温度", value: `${formatNumber(current.apparent_temperature)}°C` },
       { label: "最高/最低", value: `${formatNumber(daily.temperature_2m_max?.[0])}°C / ${formatNumber(daily.temperature_2m_min?.[0])}°C` },
-      { label: "降水", value: `${formatNumber(current.precipitation)} mm, 今日累计 ${formatNumber(daily.precipitation_sum?.[0])} mm` },
-      { label: "日出/日落", value: [daily.sunrise?.[0], daily.sunset?.[0]].filter(Boolean).join(" / ") || "未知" }
+      { label: "降水", value: `${formatNumber(current.precipitation)} mm, 今日累计 ${formatNumber(daily.precipitation_sum?.[0])} mm` }
     ],
     links: []
   };

@@ -50,9 +50,7 @@ describe("createCurrentKnowledgeProvider", () => {
           daily: {
             temperature_2m_max: [27.1],
             temperature_2m_min: [16.4],
-            precipitation_sum: [0.2],
-            sunrise: ["2026-05-23T04:53"],
-            sunset: ["2026-05-23T19:30"]
+            precipitation_sum: [0.2]
           }
         });
       }
@@ -76,6 +74,8 @@ describe("createCurrentKnowledgeProvider", () => {
     expect(context?.summary).toContain("23.5");
     expect(formatCurrentKnowledgeContext(context)).toContain("本地实时工具结果");
     expect(formatCurrentKnowledgeContext(context)).toContain("Open-Meteo");
+    expect(String(fetchImpl.mock.calls[1]?.[0])).not.toContain("sunrise");
+    expect(formatCurrentKnowledgeContext(context)).not.toContain("日出/日落");
   });
 
   it("does not call removed fixed-output APIs", async () => {

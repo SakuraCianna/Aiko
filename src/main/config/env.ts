@@ -222,9 +222,9 @@ function readTencentCredentials(env: NodeJS.ProcessEnv, required: boolean) {
   return { secretId, secretKey };
 }
 
-// 读取 Tavily API key 列表, 优先使用 TAVILY_API_KEYS, 并兼容旧的 TAVILY_API_KEY.
+// 读取 Tavily API key 轮询列表.
 function readTavilyApiKeys(env: NodeJS.ProcessEnv, enabled: boolean): string[] {
-  const rawValues = [readOptional(env, "TAVILY_API_KEYS"), readOptional(env, "TAVILY_API_KEY")].filter(Boolean);
+  const rawValues = [readOptional(env, "TAVILY_API_KEYS")].filter(Boolean);
   const keys = dedupeStrings(
     rawValues.flatMap((value) =>
       value
@@ -235,7 +235,7 @@ function readTavilyApiKeys(env: NodeJS.ProcessEnv, enabled: boolean): string[] {
   );
 
   if (enabled && keys.length === 0) {
-    throw new Error("Missing required environment variable: TAVILY_API_KEY or TAVILY_API_KEYS");
+    throw new Error("Missing required environment variable: TAVILY_API_KEYS");
   }
 
   return keys;

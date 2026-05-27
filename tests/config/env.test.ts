@@ -110,20 +110,7 @@ describe("parseEnv", () => {
         GLM_API_KEY: "secret-value",
         MCP_TAVILY_ENABLED: "true"
       })
-    ).toThrow("Missing required environment variable: TAVILY_API_KEY or TAVILY_API_KEYS");
-  });
-
-  it("falls back to the legacy single Tavily API key when the key list is not configured", () => {
-    const config = parseEnv({
-      GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
-      GLM_MODEL: "glm-4.6v-flash",
-      GLM_API_KEY: "secret-value",
-      MCP_TAVILY_ENABLED: "true",
-      TAVILY_API_KEY: "tvly-single"
-    });
-
-    expect(config.mcp.tavily.apiKey).toBe("tvly-single");
-    expect(config.mcp.tavily.apiKeys).toEqual(["tvly-single"]);
+    ).toThrow("Missing required environment variable: TAVILY_API_KEYS");
   });
 
   it("rejects unapproved Tavily MCP package names", () => {
@@ -133,7 +120,7 @@ describe("parseEnv", () => {
         GLM_MODEL: "glm-4.6v-flash",
         GLM_API_KEY: "secret-value",
         MCP_TAVILY_ENABLED: "true",
-        TAVILY_API_KEY: "tvly-single",
+        TAVILY_API_KEYS: "tvly-single",
         MCP_TAVILY_PACKAGE: "unknown-mcp-server@latest"
       })
     ).toThrow("Invalid MCP_TAVILY_PACKAGE");
@@ -146,7 +133,7 @@ describe("parseEnv", () => {
         GLM_MODEL: "glm-4.6v-flash",
         GLM_API_KEY: "secret-value",
         MCP_TAVILY_ENABLED: "true",
-        TAVILY_API_KEY: "tvly-single",
+        TAVILY_API_KEYS: "tvly-single",
         MCP_TAVILY_MODE: "remote",
         MCP_TAVILY_REMOTE_URL: "https://example.com/mcp"
       })

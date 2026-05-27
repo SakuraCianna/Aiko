@@ -29,4 +29,19 @@ describe("dead code cleanup", () => {
     expect(mcpToolProvider).not.toContain("export async function loadMcpTools");
     expect(capabilityTypes).not.toContain("export type CapabilityName");
   });
+
+  it("removes stale Superpowers implementation drafts that predate the VRM and LangGraph baseline", () => {
+    expect(existsSync("docs/superpowers/specs/2026-05-19-aiko-desktop-pet-design.md")).toBe(false);
+    expect(existsSync("docs/superpowers/plans/2026-05-21-agent-layer-split.md")).toBe(false);
+    expect(existsSync("docs/superpowers/plans/2026-05-24-langgraph-runtime-workflow.md")).toBe(false);
+  });
+
+  it("removes legacy Tavily single-key configuration from user-facing config", () => {
+    const env = readFileSync(".env.example", "utf8");
+    const envParser = readFileSync("src/main/config/env.ts", "utf8");
+
+    expect(env).not.toContain("TAVILY_API_KEY=");
+    expect(env).toContain("TAVILY_API_KEYS=");
+    expect(envParser).not.toContain("readOptional(env, \"TAVILY_API_KEY\")");
+  });
 });
