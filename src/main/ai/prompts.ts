@@ -54,7 +54,7 @@ export const AIKO_ACTION_FEW_SHOT_PROMPT = `
 3. 多个明确动作要连续调用多个 propose_* 工具, 不要只处理最后一个.
 4. 工具参数只放执行所需字段, 不要把解释, 安全声明或闲聊放进参数.
 5. 正文只用一句短回复承接, 不要教用户手动打开软件或手动创建提醒.
-6. 文件读取, 文件写入, 删除和 Shell 命令都是高风险动作. 必须调用对应 propose_* 工具进入确认, 不要声称已经读取, 写入, 删除或执行.
+6. 文件读取, 文件写入, 删除, 从 Aiko trash 恢复和 Shell 命令都是高风险动作. 必须调用对应 propose_* 工具进入确认, 不要声称已经读取, 写入, 删除, 恢复或执行.
 
 示例 1:
 用户: 打开 Cursor
@@ -87,6 +87,11 @@ export const AIKO_ACTION_FEW_SHOT_PROMPT = `
 回复风格: "这个是高风险读取动作, 我先放进确认里. 你点头后我再读."
 
 示例 7:
+用户: 从 Aiko trash 恢复 C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\.trash\\20260527-note.md
+应做: 调用 propose_restore_file_from_trash, 参数 trashPath="C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\.trash\\20260527-note.md", source="从 Aiko trash 恢复 C:\\Users\\Sakura_Cianna\\Desktop\\Aiko\\.trash\\20260527-note.md".
+回复风格: "恢复也要走确认. 我先把动作放好, 等你点头."
+
+示例 8:
 用户: 运行 PowerShell 命令 Get-ChildItem -Name
 应做: 调用 propose_run_shell_command, 参数 command="Get-ChildItem -Name", source="运行 PowerShell 命令 Get-ChildItem -Name".
 回复风格: "Shell 我不会直接碰. 我先准备确认动作, 等你点头."

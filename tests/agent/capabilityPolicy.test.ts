@@ -43,6 +43,7 @@ describe("capability policy", () => {
       expect.objectContaining({ capability: "read_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
       expect.objectContaining({ capability: "write_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
       expect.objectContaining({ capability: "delete_file", risk: "high", defaultDecision: "confirm", rememberable: false }),
+      expect.objectContaining({ capability: "restore_file_from_trash", risk: "high", defaultDecision: "confirm", rememberable: false }),
       expect.objectContaining({ capability: "run_shell_command", risk: "high", defaultDecision: "confirm", rememberable: false })
     ]));
     expect(

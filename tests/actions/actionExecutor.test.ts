@@ -341,9 +341,14 @@ describe("createActionExecutor", () => {
         readTextFile: async () => "file-content",
         writeTextFile: async (filePath, content, options) => {
           writes.push({ filePath, content, overwrite: options.overwrite });
+          return { filePath, backupPath: "C:\\Aiko\\.backups\\note.md" };
         },
         listDirectory: async () => [{ name: "note.md", path: "C:\\Aiko\\note.md", kind: "file" }],
-        moveToTrash: async (filePath) => ({ originalPath: filePath, trashPath: "C:\\Aiko\\.trash\\note.md" })
+        moveToTrash: async (filePath) => ({ originalPath: filePath, trashPath: "C:\\Aiko\\.trash\\note.md" }),
+        restoreFromTrash: async (trashPath, destinationPath) => ({
+          trashPath,
+          restoredPath: destinationPath ?? "C:\\Aiko\\note.md"
+        })
       },
       now: () => new Date("2026-05-19T10:00:00.000Z")
     });
@@ -371,11 +376,24 @@ describe("createActionExecutor", () => {
       action: { title: "Delete file", source: "test", risk: "high", capability: "delete_file", target: "C:\\Aiko\\note.md" },
       remember: true
     });
+    const restored = await executor.execute({
+      action: {
+        title: "Restore file",
+        source: "test",
+        risk: "high",
+        capability: "restore_file_from_trash",
+        target: "C:\\Aiko\\.trash\\note.md",
+        params: { destinationPath: "C:\\Aiko\\note.md" }
+      },
+      remember: true
+    });
 
     expect(read.message).toContain("file-content");
     expect(write.ok).toBe(true);
+    expect(write.message).toContain(".backups");
     expect(list.message).toContain("note.md");
     expect(deleted.message).toContain(".trash");
+    expect(restored.message).toContain("C:\\Aiko\\note.md");
     expect(writes).toEqual([{ filePath: "C:\\Aiko\\note.md", content: "new", overwrite: true }]);
     expect(executor.listRememberedActions()).toEqual([]);
   });

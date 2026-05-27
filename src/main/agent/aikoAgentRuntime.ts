@@ -1153,6 +1153,7 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
   const readFile = registry.get("read_file");
   const writeFile = registry.get("write_file");
   const deleteFile = registry.get("delete_file");
+  const restoreFileFromTrash = registry.get("restore_file_from_trash");
   const runShellCommand = registry.get("run_shell_command");
 
   return [
@@ -1385,6 +1386,32 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
         description: deleteFile?.description ?? "提出把本地文件移动到 Aiko trash 的高风险待确认动作. 只生成动作, 不直接删除.",
         schema: z.object({
           path: z.string().min(1).max(2048).describe("要移动到 Aiko trash 的本地文件路径"),
+          source: z.string().optional().describe("用户原始请求")
+        })
+      }
+    ),
+    // 生成从 Aiko trash 恢复文件的高风险待确认动作.
+    tool(
+      ({ trashPath, destinationPath, source }) => {
+        proposedActions.push({
+          title: `恢复文件:${trashPath}`,
+          source: source || trashPath,
+          risk: "high",
+          capability: "restore_file_from_trash",
+          target: trashPath,
+          params: {
+            ...(destinationPath ? { destinationPath } : {})
+          }
+        });
+        return "已生成恢复文件的高风险待确认动作.";
+      },
+      {
+        name: "propose_restore_file_from_trash",
+        description:
+          restoreFileFromTrash?.description ?? "提出从 Aiko trash 恢复文件的高风险待确认动作. 只生成动作, 不直接恢复.",
+        schema: z.object({
+          trashPath: z.string().min(1).max(2048).describe("Aiko trash 里的文件路径"),
+          destinationPath: z.string().min(1).max(2048).optional().describe("可选恢复目标路径, 省略时使用 trash 元数据里的原路径"),
           source: z.string().optional().describe("用户原始请求")
         })
       }

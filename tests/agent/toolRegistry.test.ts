@@ -16,6 +16,7 @@ describe("createDefaultToolRegistry", () => {
       "read_file",
       "write_file",
       "delete_file",
+      "restore_file_from_trash",
       "run_shell_command",
       "recall_memory",
       "list_reminders"
@@ -44,6 +45,12 @@ describe("createDefaultToolRegistry", () => {
     });
     expect(registry.get("write_file")).toMatchObject({
       capability: "write_file",
+      risk: "high",
+      requiresConfirmation: true,
+      planOnly: true
+    });
+    expect(registry.get("restore_file_from_trash")).toMatchObject({
+      capability: "restore_file_from_trash",
       risk: "high",
       requiresConfirmation: true,
       planOnly: true

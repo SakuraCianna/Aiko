@@ -255,8 +255,9 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       if (!deps.fileSystem || content === null) {
         return { ok: false, message: describeActionFailure(action, "invalid") };
       }
-      await deps.fileSystem.writeTextFile(action.target, content, { overwrite });
-      return { ok: true, message: `File written: ${action.target}` };
+      const result = await deps.fileSystem.writeTextFile(action.target, content, { overwrite });
+      const backupNote = result.backupPath ? ` Backup saved: ${result.backupPath}` : "";
+      return { ok: true, message: `File written: ${result.filePath}.${backupNote}` };
     }
 
     if (action.capability === "list_directory") {
@@ -270,6 +271,13 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
       const result = await deps.fileSystem.moveToTrash(action.target);
       return { ok: true, message: `File moved to Aiko trash: ${result.trashPath}` };
+    }
+
+    if (action.capability === "restore_file_from_trash") {
+      if (!deps.fileSystem) return { ok: false, message: describeActionFailure(action, "unsupported") };
+      const destinationPath = readStringParam(action.params, "destinationPath") ?? undefined;
+      const result = await deps.fileSystem.restoreFromTrash(action.target, destinationPath);
+      return { ok: true, message: `File restored from Aiko trash: ${result.restoredPath}` };
     }
 
     return { ok: false, message: describeActionFailure(action, "unsupported") };

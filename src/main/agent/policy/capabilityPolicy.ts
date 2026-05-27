@@ -103,6 +103,13 @@ const DEFAULT_POLICY_RULES: AikoCapabilityPolicyRule[] = [
     batchAllowed: false
   },
   {
+    capability: "restore_file_from_trash",
+    defaultDecision: "confirm",
+    risk: "high",
+    rememberable: false,
+    batchAllowed: false
+  },
+  {
     capability: "list_directory",
     defaultDecision: "confirm",
     risk: "medium",

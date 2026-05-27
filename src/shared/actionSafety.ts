@@ -21,6 +21,8 @@ export function describeRollbackStrategy(action: ActionSafetyLike): string {
       return "回滚策略: 写入前后都会进入审计日志, 后续应优先用备份或版本历史恢复.";
     case "delete_file":
       return "回滚策略: 删除动作会移动到 Aiko trash, 后续可从隔离目录恢复.";
+    case "restore_file_from_trash":
+      return "回滚策略: 恢复动作会依赖 Aiko trash 元数据, 如果原路径已有新文件会停止恢复.";
     case "run_shell_command":
       return "回滚策略: Shell 命令可能无法自动撤销, 当前只允许受控命令并完整记录输出.";
     case "read_file":

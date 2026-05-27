@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -26,6 +26,22 @@ describe("createAikoFileSystem", () => {
     await expect(fs.readTextFile(filePath)).resolves.toBe("# Aiko");
   });
 
+  it("backs up existing files before overwriting text", async () => {
+    const fs = createAikoFileSystem({
+      allowedRoots: [root],
+      trashDir: path.join(root, ".trash"),
+      backupDir: path.join(root, ".backups")
+    });
+    const filePath = path.join(root, "note.md");
+    writeFileSync(filePath, "old", "utf8");
+
+    const result = await fs.writeTextFile(filePath, "new", { overwrite: true });
+
+    expect(readFileSync(filePath, "utf8")).toBe("new");
+    expect(result.backupPath).toContain(".backups");
+    expect(readFileSync(result.backupPath!, "utf8")).toBe("old");
+  });
+
   it("rejects paths outside allowed roots", async () => {
     const fs = createAikoFileSystem({ allowedRoots: [root], trashDir: path.join(root, ".trash") });
 
@@ -43,5 +59,27 @@ describe("createAikoFileSystem", () => {
     expect(result.trashPath).toContain(".trash");
     await expect(fs.readTextFile(filePath)).rejects.toThrow();
     expect(readFileSync(result.trashPath, "utf8")).toBe("old");
+  });
+
+  it("writes restore metadata and restores files from Aiko trash", async () => {
+    const fs = createAikoFileSystem({ allowedRoots: [root], trashDir: path.join(root, ".trash") });
+    const filePath = path.join(root, "old.txt");
+    writeFileSync(filePath, "old", "utf8");
+
+    const trashed = await fs.moveToTrash(filePath);
+    const metadataPath = `${trashed.trashPath}.restore.json`;
+
+    expect(existsSync(metadataPath)).toBe(true);
+    expect(JSON.parse(readFileSync(metadataPath, "utf8"))).toMatchObject({
+      originalPath: filePath,
+      trashPath: trashed.trashPath
+    });
+
+    const restored = await fs.restoreFromTrash(trashed.trashPath);
+
+    expect(restored.restoredPath).toBe(filePath);
+    expect(readFileSync(filePath, "utf8")).toBe("old");
+    expect(existsSync(trashed.trashPath)).toBe(false);
+    expect(existsSync(metadataPath)).toBe(false);
   });
 });

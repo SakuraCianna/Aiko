@@ -138,6 +138,19 @@ const DEFAULT_TOOLS: AikoToolDefinition[] = [
     planOnly: true
   },
   {
+    name: "restore_file_from_trash",
+    description: "提出从 Aiko trash 恢复文件的高风险待确认动作. 只生成动作, 不直接恢复.",
+    capability: "restore_file_from_trash",
+    risk: "high",
+    requiresConfirmation: true,
+    schema: {
+      trashPath: "string",
+      destinationPath: "string?",
+      source: "string?"
+    },
+    planOnly: true
+  },
+  {
     name: "run_shell_command",
     description: "提出执行受控 PowerShell 命令的高风险待确认动作. 只生成动作, 不直接执行.",
     capability: "run_shell_command",
