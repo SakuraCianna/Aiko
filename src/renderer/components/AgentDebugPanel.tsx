@@ -75,6 +75,7 @@ export function AgentDebugPanel() {
         <SummaryCard title="Trace" value={snapshot.traces.length} detail={formatLatestTrace(latestTrace)} />
         <SummaryCard title="动作日志" value={snapshot.actionJournal.length} detail={formatLatestAction(snapshot)} />
         <SummaryCard title="Worker" value={snapshot.workers.length} detail={snapshot.workers.map((worker) => worker.name).join(", ")} />
+        <SummaryCard title="Worker Run" value={snapshot.workerRuns.length} detail={formatLatestWorkerRun(snapshot)} />
       </div>
 
       <section className="panel-section">
@@ -129,6 +130,18 @@ export function AgentDebugPanel() {
             <strong>{entry.phase}</strong>
             <p>{entry.capability} / {entry.target}</p>
             <span>{entry.decision ?? entry.ok ?? entry.source ?? "pending"}</span>
+          </article>
+        ))}
+      </section>
+
+      <section className="panel-section">
+        <h3>最近 Worker 调度</h3>
+        {snapshot.workerRuns.length === 0 && <p className="panel-muted">还没有 worker 调度记录.</p>}
+        {snapshot.workerRuns.slice(-6).reverse().map((run) => (
+          <article key={run.id} className="agent-debug-card">
+            <strong>{run.workerName}</strong>
+            <p>{run.inputSummary}</p>
+            <span>{run.status}{run.error ? `: ${run.error}` : ""}</span>
           </article>
         ))}
       </section>
@@ -192,6 +205,13 @@ function formatLatestAction(snapshot: AikoAgentDebugSnapshotDto) {
   return `${entry.phase}: ${entry.capability}`;
 }
 
+// 格式化最近 worker 调度记录.
+function formatLatestWorkerRun(snapshot: AikoAgentDebugSnapshotDto) {
+  const run = snapshot.workerRuns.at(-1);
+  if (!run) return "";
+  return `${run.status}: ${run.workerName}`;
+}
+
 // 限制 data 展示长度, 防止大对象撑坏面板布局.
 function formatEventData(data: Record<string, unknown>) {
   const text = JSON.stringify(data);
@@ -204,5 +224,6 @@ const emptySnapshot: AikoAgentDebugSnapshotDto = {
   experienceSignals: [],
   actionJournal: [],
   traces: [],
-  workers: []
+  workers: [],
+  workerRuns: []
 };

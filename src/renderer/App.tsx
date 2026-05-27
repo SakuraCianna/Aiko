@@ -12,6 +12,7 @@ import { PanelShell } from "./components/PanelShell";
 import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { TaskStatusCard } from "./components/TaskStatusCard";
 import { isCancellationCommand } from "./chat/cancelCommand";
 import { selectActionForCancellation } from "./chat/pendingAction";
 import { selectAgentStatusCue } from "./character/agentStatusMotion";
@@ -22,6 +23,12 @@ import {
   selectSpeechMotion
 } from "./character/motionCues";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
+import {
+  isTaskCardTerminal,
+  markTaskCardCancelled,
+  reduceTaskCardFromAgentStatus,
+  type AikoTaskCard
+} from "./task/taskStatusModel";
 
 // 渲染桌宠主界面, 负责聊天, 待确认动作和面板状态.
 export function App() {
@@ -32,9 +39,12 @@ export function App() {
   const [controlsVisible, setControlsVisible] = useState(false);
   const [characterBehavior, setCharacterBehavior] = useState<CharacterBehavior>("idle");
   const [motionRequest, setMotionRequest] = useState<{ motion: CharacterMotion; id: number } | null>(null);
+  const [taskCard, setTaskCard] = useState<AikoTaskCard | null>(null);
+  const [mouthOpen, setMouthOpen] = useState(0);
   const speechControllerRef = useRef<AikoSpeechController | null>(null);
   const hideControlsTimerRef = useRef<number | null>(null);
   const characterIdleTimerRef = useRef<number | null>(null);
+  const hideTaskCardTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const streamMotionPlayedRef = useRef(false);
 
@@ -63,9 +73,19 @@ export function App() {
       speechControllerRef.current = null;
       clearHideControlsTimer();
       clearCharacterIdleTimer();
+      clearHideTaskCardTimer();
       activeStreamIdRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    clearHideTaskCardTimer();
+    if (!isTaskCardTerminal(taskCard)) return;
+    hideTaskCardTimerRef.current = window.setTimeout(() => {
+      setTaskCard(null);
+      hideTaskCardTimerRef.current = null;
+    }, 6000);
+  }, [taskCard]);
 
   // 判断指定请求是否仍然是当前活跃的流式请求.
   function isActiveRequest(requestId: string) {
@@ -76,13 +96,22 @@ export function App() {
   function handleProactiveMessage(proactive: AikoProactiveMessage) {
     if (activeStreamIdRef.current) return;
     setMessage(proactive.message);
-    speakAiko(proactive.message, "idle", "speaking", "notice");
+    if (proactive.shouldSpeak) {
+      speakAiko(proactive.message, "idle", "speaking", proactive.tone === "curious" ? "curious" : "notice", {
+        allowCloudTts: true,
+        maxCloudSegments: 1
+      });
+    } else {
+      setCharacterBehaviorNow("idle");
+      requestCharacterMotion(proactive.tone === "curious" ? "curious" : "notice");
+    }
     showControls();
   }
 
   // 根据主进程发来的 Agent 阶段事件更新角色动作, 让 VRM 不只依赖前端猜测.
   function handleAgentStatus(status: Parameters<typeof selectAgentStatusCue>[0]) {
     if (status.requestId && activeStreamIdRef.current && status.requestId !== activeStreamIdRef.current) return;
+    setTaskCard((current) => reduceTaskCardFromAgentStatus(current, status));
     const cue = selectAgentStatusCue(status);
     if (!cue) return;
     setCharacterBehaviorNow(cue.behavior);
@@ -102,6 +131,7 @@ export function App() {
     activeStreamIdRef.current = requestId;
     streamMotionPlayedRef.current = false;
     setPendingAction(null);
+    setTaskCard(null);
     setMessage("正在思考...");
     const initialCue = selectInitialCharacterCue(payload);
     setCharacterBehaviorNow(initialCue.behavior);
@@ -149,6 +179,8 @@ export function App() {
     activeStreamIdRef.current = null;
     setPendingAction(null);
     speechControllerRef.current?.cancel();
+    setMouthOpen(0);
+    setTaskCard((current) => markTaskCardCancelled(current));
 
     if (requestId) {
       void window.aiko.cancelStream(requestId);
@@ -181,6 +213,7 @@ export function App() {
     activeStreamIdRef.current = null;
     void window.aiko.cancelStream(previousRequestId);
     speechControllerRef.current?.cancel();
+    setMouthOpen(0);
   }
 
   // 执行当前待确认动作, 可选择是否记住授权.
@@ -243,6 +276,13 @@ export function App() {
     characterIdleTimerRef.current = null;
   }
 
+  // 清理任务卡片自动隐藏计时器, 防止完成状态被旧 timer 提前清掉.
+  function clearHideTaskCardTimer() {
+    if (hideTaskCardTimerRef.current === null) return;
+    window.clearTimeout(hideTaskCardTimerRef.current);
+    hideTaskCardTimerRef.current = null;
+  }
+
   // 立即切换角色持续行为状态.
   function setCharacterBehaviorNow(behavior: CharacterBehavior) {
     clearCharacterIdleTimer();
@@ -268,17 +308,23 @@ export function App() {
     text: string,
     afterSpeech: CharacterBehavior = "idle",
     speakingBehavior: CharacterBehavior = "speaking",
-    motion: CharacterMotion = selectSpeechMotion(text)
+    motion: CharacterMotion = selectSpeechMotion(text),
+    speechOptions: { allowCloudTts?: boolean; maxCloudSegments?: number } = {}
   ) {
     const controller = speechControllerRef.current;
     setCharacterBehaviorNow(speakingBehavior);
     requestCharacterMotion(motion);
     const started = controller?.speak(text, {
+      allowCloudTts: speechOptions.allowCloudTts,
+      maxCloudSegments: speechOptions.maxCloudSegments,
+      onMouthOpen: setMouthOpen,
       onStart: () => setCharacterBehaviorNow(speakingBehavior),
       onEnd: () => {
+        setMouthOpen(0);
         setCharacterBehavior(afterSpeech);
       },
       onError: () => {
+        setMouthOpen(0);
         setCharacterBehavior(afterSpeech);
       }
     });
@@ -292,12 +338,16 @@ export function App() {
       .then((didStart) => {
         if (!didStart) scheduleSpeechFallback(afterSpeech);
       })
-      .catch(() => scheduleSpeechFallback(afterSpeech));
+      .catch(() => {
+        setMouthOpen(0);
+        scheduleSpeechFallback(afterSpeech);
+      });
   }
 
   // 语音不可用时仍然让角色短暂停留在说话动作, 避免 UI 直接僵住.
   function scheduleSpeechFallback(afterSpeech: CharacterBehavior) {
       clearCharacterIdleTimer();
+      setMouthOpen(0);
       characterIdleTimerRef.current = window.setTimeout(() => {
         setCharacterBehavior(afterSpeech);
         characterIdleTimerRef.current = null;
@@ -325,11 +375,13 @@ export function App() {
         <PetStage
           behavior={characterBehavior}
           motionRequest={motionRequest}
+          mouthOpen={mouthOpen}
           onOpenSettings={() => setActivePanel("settings")}
           onToggleClickThrough={toggleClickThrough}
           onControlsEnter={showControls}
           onControlsLeave={hideControlsSoon}
         />
+        <TaskStatusCard card={taskCard} />
         <div
           className={`hover-controls${controlsVisible ? " controls-visible" : ""}`}
           onMouseEnter={showControls}

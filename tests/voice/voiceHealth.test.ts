@@ -86,6 +86,13 @@ function baseConfig(options: { asrEnabled?: boolean; ttsEnabled?: boolean; empty
         sampleRate: 24000,
         timeoutMs: 30000
       }
+    },
+    companion: {
+      enabled: true,
+      intervalHours: 24,
+      ttsEnabled: false,
+      quietStartHour: 23,
+      quietEndHour: 8
     }
   };
 }

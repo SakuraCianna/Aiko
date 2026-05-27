@@ -44,6 +44,13 @@ export type AppConfig = {
       timeoutMs: number;
     };
   };
+  companion: {
+    enabled: boolean;
+    intervalHours: number;
+    ttsEnabled: boolean;
+    quietStartHour: number;
+    quietEndHour: number;
+  };
 };
 
 export type TencentAsrVoiceFormat = "wav" | "mp3" | "m4a" | "aac" | "ogg-opus" | "pcm";
@@ -59,6 +66,9 @@ const DEFAULT_TENCENT_ASR_FORMAT: TencentAsrVoiceFormat = "wav";
 const DEFAULT_TENCENT_TTS_VOICE_TYPE = 603007;
 const DEFAULT_TENCENT_TTS_VOICE_NAME = "邻家女孩";
 const DEFAULT_TENCENT_TTS_SAMPLE_RATE: AppConfig["voice"]["tts"]["sampleRate"] = 24000;
+const DEFAULT_COMPANION_INTERVAL_HOURS = 24;
+const DEFAULT_COMPANION_QUIET_START_HOUR = 23;
+const DEFAULT_COMPANION_QUIET_END_HOUR = 8;
 const ALLOWED_TAVILY_MCP_PACKAGES = new Set([DEFAULT_TAVILY_MCP_PACKAGE]);
 const ALLOWED_TAVILY_REMOTE_HOSTS = new Set(["mcp.tavily.com"]);
 const ALLOWED_ASR_FORMATS = new Set<TencentAsrVoiceFormat>(["wav", "mp3", "m4a", "aac", "ogg-opus", "pcm"]);
@@ -72,6 +82,7 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
   const apiKey = readRequired(env, "GLM_API_KEY");
   const tavily = readTavilyMcpConfig(env);
   const voice = readVoiceConfig(env);
+  const companion = readCompanionConfig(env);
 
   return {
     glm: {
@@ -83,7 +94,19 @@ export function parseEnv(env: NodeJS.ProcessEnv): AppConfig {
     mcp: {
       tavily
     },
-    voice
+    voice,
+    companion
+  };
+}
+
+// 读取桌宠主动陪伴配置, 默认每天最多轻量出现一次并避开安静时段.
+function readCompanionConfig(env: NodeJS.ProcessEnv): AppConfig["companion"] {
+  return {
+    enabled: readBoolean(env, "AIKO_COMPANION_ENABLED", true),
+    intervalHours: readPositiveInteger(env, "AIKO_COMPANION_INTERVAL_HOURS", DEFAULT_COMPANION_INTERVAL_HOURS),
+    ttsEnabled: readBoolean(env, "AIKO_COMPANION_TTS_ENABLED", false),
+    quietStartHour: readHour(env, "AIKO_COMPANION_QUIET_START_HOUR", DEFAULT_COMPANION_QUIET_START_HOUR),
+    quietEndHour: readHour(env, "AIKO_COMPANION_QUIET_END_HOUR", DEFAULT_COMPANION_QUIET_END_HOUR)
   };
 }
 
@@ -295,6 +318,17 @@ function readPositiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: num
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`Invalid positive integer environment variable: ${name}`);
+  }
+  return parsed;
+}
+
+// 读取 0 到 23 的小时配置, 用于主动陪伴的安静时段.
+function readHour(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const value = readOptional(env, name);
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) {
+    throw new Error(`Invalid hour environment variable: ${name}`);
   }
   return parsed;
 }

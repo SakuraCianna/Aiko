@@ -2,6 +2,7 @@ import { app, type BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createAikoAgentRuntime } from "./agent/aikoAgentRuntime";
+import { createAikoCompanionHeartbeat } from "./agent/companion/companionHeartbeat";
 import { createAikoCommitmentHeartbeat } from "./agent/commitments/commitmentHeartbeat";
 import { createAikoCommitmentService } from "./agent/commitments/commitmentService";
 import { createCommitmentProactiveMessage } from "./agent/commitments/proactiveCommitment";
@@ -10,15 +11,18 @@ import { attachAikoAgentStatusForwarder } from "./agent/runtime/agentStatus";
 import { createAikoRuntimeHooks } from "./agent/runtime/runtimeHooks";
 import { createSqliteCheckpointSaver } from "./agent/graph/sqliteCheckpointSaver";
 import { loadConfig } from "./config/env";
+import type { AppConfig } from "./config/env";
 import type { AikoDatabase } from "./database/connection";
 import { openDatabase } from "./database/connection";
 import {
+  createAppStateRepository,
   createAuditRepository,
   createApplicationPreferenceRepository,
   createMemoryRepository,
   createPermissionRepository,
   createReminderRepository
 } from "./database/repositories";
+import type { AppStateRepository } from "./database/repositories";
 import { registerAikoHandlers } from "./ipc/handlers";
 import { createSqliteVecMemoryIndex } from "./memory/sqliteVecMemoryIndex";
 import { createTencentCloudSpeechUnderstandingProvider } from "./voice/tencentCloudAsrProvider";
@@ -33,6 +37,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const preloadPath = resolvePreloadPath(__dirname);
 let database: AikoDatabase | null = null;
 let stopCommitmentHeartbeat: (() => void) | null = null;
+let stopCompanionHeartbeat: (() => void) | null = null;
 let stopAgentStatusForwarder: (() => void) | null = null;
 
 configureDevelopmentSessionData();
@@ -71,6 +76,7 @@ void app.whenReady().then(() => {
   const permissionRepository = createPermissionRepository(database.db);
   const reminderRepository = createReminderRepository(database.db);
   const applicationPreferenceRepository = createApplicationPreferenceRepository(database.db);
+  const appStateRepository = createAppStateRepository(database.db);
 
   loadRenderer(petWindow, __dirname);
   loadRenderer(panelWindow, __dirname);
@@ -90,6 +96,7 @@ void app.whenReady().then(() => {
     voiceHealthService
   });
   stopCommitmentHeartbeat = startCommitmentHeartbeat([petWindow, panelWindow], commitmentService);
+  stopCompanionHeartbeat = startCompanionHeartbeat([petWindow, panelWindow], config.companion, appStateRepository);
 });
 
 app.on("window-all-closed", () => {
@@ -99,6 +106,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   stopCommitmentHeartbeat?.();
   stopCommitmentHeartbeat = null;
+  stopCompanionHeartbeat?.();
+  stopCompanionHeartbeat = null;
   stopAgentStatusForwarder?.();
   stopAgentStatusForwarder = null;
   database?.close();
@@ -114,6 +123,32 @@ function startCommitmentHeartbeat(
     commitmentService,
     onDue(commitment) {
       sendProactiveMessage(windows, createCommitmentProactiveMessage(commitment));
+    }
+  });
+  const interval = setInterval(() => {
+    void heartbeat.tick();
+  }, 60_000);
+  interval.unref?.();
+  void heartbeat.tick();
+
+  return () => clearInterval(interval);
+}
+
+// 启动桌宠主动陪伴心跳, 默认每天最多出现一次, 并通过 settings 表持久化节流时间.
+function startCompanionHeartbeat(
+  windows: BrowserWindow[],
+  config: AppConfig["companion"],
+  appStateRepository: AppStateRepository
+) {
+  const stateKey = "companion:last_check_in_at";
+  const heartbeat = createAikoCompanionHeartbeat({
+    config,
+    stateStore: {
+      getLastCheckInAt: () => appStateRepository.get(stateKey),
+      setLastCheckInAt: (value) => appStateRepository.set(stateKey, value)
+    },
+    onDue(message) {
+      sendProactiveMessage(windows, message);
     }
   });
   const interval = setInterval(() => {

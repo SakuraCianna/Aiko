@@ -225,7 +225,8 @@ function createRuntime(options: {
         experienceSignals: [],
         actionJournal: [],
         traces: [],
-        workers: []
+        workers: [],
+        workerRuns: []
       };
     }
   };

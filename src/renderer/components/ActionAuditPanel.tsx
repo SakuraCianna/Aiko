@@ -304,5 +304,6 @@ const emptySnapshot: AikoAgentDebugSnapshotDto = {
   experienceSignals: [],
   actionJournal: [],
   traces: [],
-  workers: []
+  workers: [],
+  workerRuns: []
 };

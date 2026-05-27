@@ -47,6 +47,13 @@ describe("parseEnv", () => {
         timeoutMs: 30000
       }
     });
+    expect(config.companion).toEqual({
+      enabled: true,
+      intervalHours: 24,
+      ttsEnabled: false,
+      quietStartHour: 23,
+      quietEndHour: 8
+    });
   });
 
   it("parses optional GLM fallback model route without duplicates", () => {
@@ -199,5 +206,26 @@ describe("parseEnv", () => {
         AIKO_ASR_ENABLED: "true"
       })
     ).toThrow("Missing required environment variable: TENCENTCLOUD_SECRET_ID or TENCENTCLOUD_SECRET_KEY");
+  });
+
+  it("parses companion heartbeat config for proactive desktop-pet presence", () => {
+    const config = parseEnv({
+      GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
+      GLM_MODEL: "glm-4.6v-flash",
+      GLM_API_KEY: "secret-value",
+      AIKO_COMPANION_ENABLED: "false",
+      AIKO_COMPANION_INTERVAL_HOURS: "12",
+      AIKO_COMPANION_TTS_ENABLED: "true",
+      AIKO_COMPANION_QUIET_START_HOUR: "22",
+      AIKO_COMPANION_QUIET_END_HOUR: "7"
+    });
+
+    expect(config.companion).toEqual({
+      enabled: false,
+      intervalHours: 12,
+      ttsEnabled: true,
+      quietStartHour: 22,
+      quietEndHour: 7
+    });
   });
 });

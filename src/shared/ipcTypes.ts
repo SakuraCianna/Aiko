@@ -112,10 +112,12 @@ export type AikoAgentStatusEventDto = {
 
 export type AikoProactiveMessage = {
   id: string;
-  kind: "commitment";
+  kind: "commitment" | "companion_checkin";
   message: string;
-  commitmentId: string;
+  commitmentId?: string;
   createdAt: string;
+  shouldSpeak?: boolean;
+  tone?: "gentle" | "notice" | "curious";
 };
 
 export type CursorState = {
@@ -225,6 +227,17 @@ export type AikoWorkerSummaryDto = {
   description: string;
 };
 
+export type AikoWorkerRunDto = {
+  id: string;
+  workerName: string;
+  status: "running" | "completed" | "failed";
+  inputSummary: string;
+  outputSummary?: string;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
+};
+
 export type AikoExperienceSignalDto = {
   id: string;
   tone: "positive" | "negative" | "corrective" | "neutral";
@@ -244,6 +257,7 @@ export type AikoAgentDebugSnapshotDto = {
   actionJournal: AikoActionJournalEntryDto[];
   traces: AikoTraceRecordDto[];
   workers: AikoWorkerSummaryDto[];
+  workerRuns: AikoWorkerRunDto[];
 };
 
 export type AikoApi = {

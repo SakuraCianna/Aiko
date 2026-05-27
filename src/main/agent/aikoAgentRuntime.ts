@@ -482,7 +482,8 @@ export function createAikoAgentRuntime(options: AikoAgentRuntimeOptions): AikoAg
       experienceSignals: experiencePolicy.listSignals(),
       actionJournal: actionJournal.list(),
       traces: traceRecorder.list(),
-      workers: workerRegistry.list()
+      workers: workerRegistry.list(),
+      workerRuns: "listRuns" in workerRegistry ? workerRegistry.listRuns() : []
     })
   };
 

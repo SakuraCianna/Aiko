@@ -1270,6 +1270,9 @@ describe("createAikoAgentRuntime", () => {
       list() {
         return [];
       },
+      listRuns() {
+        return [];
+      },
       async run(name: string, input: unknown) {
         workerRuns.push(`${name}:${typeof input}`);
         return null;

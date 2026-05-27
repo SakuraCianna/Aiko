@@ -22,11 +22,39 @@ describe("createAikoWorkerRegistry", () => {
       worker: "planning_writer",
       input: { topic: "agent" }
     });
+    expect(registry.listRuns()).toMatchObject([
+      {
+        workerName: "planning_writer",
+        status: "completed",
+        inputSummary: expect.stringContaining("agent"),
+        outputSummary: expect.stringContaining("planning_writer")
+      }
+    ]);
   });
 
   it("rejects unknown workers", async () => {
     const registry = createAikoWorkerRegistry();
 
     await expect(registry.run("missing", {})).rejects.toThrow("Unknown Aiko worker: missing");
+  });
+
+  it("records failed worker runs for agent diagnostics", async () => {
+    const registry = createAikoWorkerRegistry();
+    registry.register({
+      name: "broken_worker",
+      description: "Fails intentionally.",
+      async run() {
+        throw new Error("boom");
+      }
+    });
+
+    await expect(registry.run("broken_worker", {})).rejects.toThrow("boom");
+    expect(registry.listRuns()).toMatchObject([
+      {
+        workerName: "broken_worker",
+        status: "failed",
+        error: "boom"
+      }
+    ]);
   });
 });

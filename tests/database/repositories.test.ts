@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { runMigrations } from "../../src/main/database/migrations";
 import {
   createApplicationPreferenceRepository,
+  createAppStateRepository,
   createAuditRepository,
   createMemoryRepository,
   createPermissionRepository,
@@ -139,6 +140,19 @@ describe("database repositories", () => {
 
     repository.setDefaultApplication("浏览器", "Microsoft Edge");
     expect(repository.getDefaultApplication("浏览器")).toBe("Microsoft Edge");
+
+    db.close();
+  });
+
+  it("persists app state values for companion heartbeat scheduling", () => {
+    const db = createMemoryDatabase();
+    const repository = createAppStateRepository(db);
+
+    expect(repository.get("companion:last_check_in_at")).toBeNull();
+
+    repository.set("companion:last_check_in_at", "2026-05-27T09:00:00.000Z");
+
+    expect(createAppStateRepository(db).get("companion:last_check_in_at")).toBe("2026-05-27T09:00:00.000Z");
 
     db.close();
   });

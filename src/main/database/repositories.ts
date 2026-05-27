@@ -27,6 +27,7 @@ export type ReminderRepository = ReturnType<typeof createReminderRepository>;
 export type MemoryRepository = ReturnType<typeof createMemoryRepository>;
 export type ApplicationPreferenceRepository = ReturnType<typeof createApplicationPreferenceRepository>;
 export type AuditRepository = ReturnType<typeof createAuditRepository>;
+export type AppStateRepository = ReturnType<typeof createAppStateRepository>;
 
 type MemoryRepositoryOptions = {
   vectorIndex?: AikoMemoryVectorIndex;
@@ -597,6 +598,28 @@ export function createApplicationPreferenceRepository(db: DatabaseSync) {
         .prepare("SELECT value FROM settings WHERE key = ? LIMIT 1")
         .get(defaultApplicationKey(defaultFor)) as { value: string } | undefined;
       return row?.value ?? null;
+    }
+  };
+}
+
+// 创建通用应用状态仓储, 复用 settings 表保存轻量运行状态.
+export function createAppStateRepository(db: DatabaseSync) {
+  return {
+    // 读取指定状态键, 未设置时返回 null.
+    get(key: string) {
+      const row = db.prepare("SELECT value FROM settings WHERE key = ? LIMIT 1").get(key) as { value: string } | undefined;
+      return row?.value ?? null;
+    },
+
+    // 写入指定状态键, 用于记录主动陪伴上次触发时间等轻量状态.
+    set(key: string, value: string) {
+      db.prepare(
+        `
+        INSERT INTO settings (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `
+      ).run(key, value);
     }
   };
 }

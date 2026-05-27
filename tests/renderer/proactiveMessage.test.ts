@@ -17,6 +17,7 @@ describe("renderer proactive message bridge", () => {
 
     expect(app).toContain("window.aiko.onProactiveMessage");
     expect(app).toContain("handleProactiveMessage");
+    expect(app).toContain("proactive.shouldSpeak");
     expect(app).toContain("speakAiko(proactive.message");
   });
 });

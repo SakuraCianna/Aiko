@@ -7,6 +7,7 @@ import { createCharacterRenderer } from "../character/createCharacterRenderer";
 type PetStageProps = {
   behavior: CharacterBehavior;
   motionRequest: { motion: CharacterMotion; id: number } | null;
+  mouthOpen: number;
   onOpenSettings: () => void;
   onToggleClickThrough: () => void;
   onControlsEnter: () => void;
@@ -20,6 +21,7 @@ const GLOBAL_LOOK_INTERVAL_MS = 33;
 export function PetStage({
   behavior,
   motionRequest,
+  mouthOpen,
   onOpenSettings,
   onToggleClickThrough,
   onControlsEnter,
@@ -61,6 +63,10 @@ export function PetStage({
     if (!motionRequest) return;
     rendererRef.current?.playMotion(motionRequest.motion);
   }, [motionRequest]);
+
+  useEffect(() => {
+    rendererRef.current?.setMouthOpen(mouthOpen);
+  }, [mouthOpen]);
 
   useEffect(() => {
     let disposed = false;
