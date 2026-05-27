@@ -262,6 +262,16 @@ button {
   background: rgba(255, 247, 248, 0.96);
 }
 
+.safety-impact-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: #354b5e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .rollback-note {
   color: #49657e;
   font-size: 13px;
@@ -656,6 +666,76 @@ button {
   font-size: 12px;
 }
 
+.audit-restore-history {
+  padding: 10px;
+  border: 1px solid rgba(73, 101, 126, 0.14);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.72);
+}
+
+.audit-restore-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-restore-entry {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(73, 101, 126, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.audit-restore-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.audit-restore-head strong {
+  color: #26394b;
+  font-size: 13px;
+}
+
+.audit-restore-head small {
+  color: #667789;
+  font-size: 11px;
+}
+
+.audit-restore-restored .audit-restore-head strong {
+  color: #27614b;
+}
+
+.audit-path-grid {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.audit-path-grid div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.audit-path-grid dt {
+  color: #667789;
+  font-size: 12px;
+}
+
+.audit-path-grid dd {
+  margin: 0;
+  color: #26394b;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .audit-log-list {
   display: grid;
   gap: 10px;
@@ -769,6 +849,18 @@ button {
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.audit-shell-artifact dd {
+  white-space: pre-wrap;
+}
+
+.audit-artifact-ok dd {
+  color: #27614b;
+}
+
+.audit-artifact-failed dd {
+  color: #8d3241;
 }
 
 .agent-debug-card {

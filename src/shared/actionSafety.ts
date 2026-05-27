@@ -1,6 +1,8 @@
 import type { AikoActionJournalEntryDto, PendingActionDto } from "./ipcTypes";
 
-type ActionSafetyLike = Pick<PendingActionDto | AikoActionJournalEntryDto, "capability" | "target" | "risk">;
+type ActionSafetyLike = Pick<PendingActionDto | AikoActionJournalEntryDto, "capability" | "target" | "risk"> & {
+  params?: Record<string, string | number | boolean>;
+};
 
 // 把动作风险等级转换为面向用户的确认文案.
 export function describeActionRisk(action: ActionSafetyLike): string {
@@ -12,6 +14,52 @@ export function describeActionRisk(action: ActionSafetyLike): string {
     return `${riskLabel}: 这个操作会读取或写入较敏感的本地内容, 执行前需要你确认.`;
   }
   return `${riskLabel}: 这是低风险本地操作, 首次执行仍需要你确认.`;
+}
+
+// 描述动作会具体影响什么对象, 用于确认弹窗里给用户更细的判断依据.
+export function describeActionImpact(action: ActionSafetyLike): string[] {
+  switch (action.capability) {
+    case "run_shell_command":
+      return [
+        `将执行受控 PowerShell 只读命令: ${action.target}.`,
+        "执行后会记录 exit code, stdout 和 stderr, 但不会保证自动撤销."
+      ];
+    case "delete_file":
+      return [
+        `将把目标文件移动到 Aiko trash: ${action.target}.`,
+        "不会直接永久删除, 后续可从动作审计里准备恢复."
+      ];
+    case "restore_file_from_trash":
+      return [
+        `将从 Aiko trash 恢复文件: ${action.target}.`,
+        `目标路径: ${readStringParam(action, "destinationPath") ?? "恢复元数据中的原路径"}. 如果目标已存在, 执行器会停止恢复.`
+      ];
+    case "write_file":
+      return [
+        `将写入目标文件: ${action.target}.`,
+        "覆盖写入前会先保存备份路径到动作审计."
+      ];
+    case "read_file":
+      return [
+        `将读取目标文件内容: ${action.target}.`,
+        "读取动作不会修改文件, 但文件内容可能包含敏感信息."
+      ];
+    case "list_directory":
+      return [
+        `将列出目标目录内容: ${action.target}.`,
+        "目录结构会进入本次回复和动作审计."
+      ];
+    case "batch_actions":
+      return [
+        "将按顺序执行一组已列出的子动作.",
+        "任意子动作失败时会停止扩大影响, 并写入动作审计."
+      ];
+    default:
+      return [
+        `目标: ${action.target}.`,
+        "执行前请确认来源和目标是否符合你的真实意图."
+      ];
+  }
 }
 
 // 描述动作的回滚或恢复策略, 用于确认弹窗和审计面板.
@@ -45,4 +93,10 @@ export function formatRiskLabel(risk: ActionSafetyLike["risk"]): string {
   if (risk === "high") return "高风险";
   if (risk === "medium") return "中风险";
   return "低风险";
+}
+
+// 从动作参数中读取字符串, 仅用于展示确认文案.
+function readStringParam(action: ActionSafetyLike, key: string) {
+  const value = action.params?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }

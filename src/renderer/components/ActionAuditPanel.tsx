@@ -10,9 +10,11 @@ import type {
   PendingActionDto
 } from "../../shared/ipcTypes";
 import {
+  buildRestoreHistory,
   createRestoreActionFromAuditEntry,
   extractAuditArtifacts,
   filterAuditEntries,
+  type RestoreHistoryItem,
   type AuditResultFilter,
   type AuditRiskFilter
 } from "./actionAuditHelpers";
@@ -45,6 +47,7 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
     () => Array.from(new Set(snapshot.actionJournal.map((entry) => entry.capability))).sort(),
     [snapshot.actionJournal]
   );
+  const restoreHistory = useMemo(() => buildRestoreHistory(snapshot.actionJournal).slice(0, 8), [snapshot.actionJournal]);
   const filteredEntries = useMemo(
     () =>
       filterAuditEntries(snapshot.actionJournal, {
@@ -95,6 +98,20 @@ export function ActionAuditPanel({ onProposeAction }: ActionAuditPanelProps) {
         <SummaryCard title="高风险" value={highRiskCount} />
         <SummaryCard title="失败执行" value={failedCount} />
       </div>
+
+      {restoreHistory.length > 0 && (
+        <section className="panel-section audit-restore-history">
+          <div className="audit-section-heading">
+            <h3>恢复历史</h3>
+            <span>{restoreHistory.length}</span>
+          </div>
+          <ol className="audit-restore-list">
+            {restoreHistory.map((item) => (
+              <RestoreHistoryEntry key={item.id} item={item} onProposeAction={onProposeAction} />
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section className="panel-section">
         <div className="audit-section-heading">
@@ -170,6 +187,51 @@ function SummaryCard({ title, value }: { title: string; value: number }) {
   );
 }
 
+// 渲染从 Aiko trash 恢复文件的历史入口.
+function RestoreHistoryEntry({
+  item,
+  onProposeAction
+}: {
+  item: RestoreHistoryItem;
+  onProposeAction?: (action: PendingActionDto, message?: string) => void;
+}) {
+  const restoreAction = item.restoreAction;
+
+  return (
+    <li className={`audit-restore-entry audit-restore-${item.status}`}>
+      <div className="audit-restore-head">
+        <strong>{item.status === "restored" ? "已恢复" : "待恢复"}</strong>
+        <small>{formatRestoreTime(item)}</small>
+      </div>
+      <dl className="audit-path-grid">
+        <div>
+          <dt>原路径</dt>
+          <dd>{item.originalPath}</dd>
+        </div>
+        <div>
+          <dt>隔离路径</dt>
+          <dd>{item.trashPath}</dd>
+        </div>
+        {item.restoredPath && (
+          <div>
+            <dt>恢复到</dt>
+            <dd>{item.restoredPath}</dd>
+          </div>
+        )}
+      </dl>
+      {restoreAction && onProposeAction && (
+        <button
+          type="button"
+          className="audit-restore-button"
+          onClick={() => onProposeAction(restoreAction, "我把恢复动作准备好了. 等你确认后再恢复文件.")}
+        >
+          准备恢复
+        </button>
+      )}
+    </li>
+  );
+}
+
 // 渲染单条动作审计记录.
 function AuditEntry({
   entry,
@@ -209,7 +271,10 @@ function AuditEntry({
       {artifacts.length > 0 && (
         <dl className="audit-artifact-list">
           {artifacts.map((artifact) => (
-            <div key={`${artifact.label}:${artifact.value}`}>
+            <div
+              key={`${artifact.label}:${artifact.value}`}
+              className={`${artifact.label.includes("输出") || artifact.label === "退出码" ? "audit-shell-artifact " : ""}audit-artifact-${artifact.tone ?? "neutral"}`}
+            >
               <dt>{artifact.label}</dt>
               <dd>{artifact.value}</dd>
             </div>
@@ -218,6 +283,12 @@ function AuditEntry({
       )}
     </li>
   );
+}
+
+// 格式化恢复历史时间, 优先展示恢复时间.
+function formatRestoreTime(item: RestoreHistoryItem) {
+  const value = item.restoredAt ?? item.deletedAt;
+  return value ? new Date(value).toLocaleString() : "未知时间";
 }
 
 // 格式化审计记录当前阶段和结果.

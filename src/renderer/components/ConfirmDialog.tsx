@@ -1,5 +1,6 @@
 import type { PendingActionChoiceDto, PendingActionDto } from "../../shared/ipcTypes";
 import {
+  describeActionImpact,
   describeActionRisk,
   describeRollbackStrategy,
   shouldOfferRememberedAuthorization
@@ -28,6 +29,7 @@ export function ConfirmDialog({
   const choices = action.choices ?? [];
   const batchActions = action.actions ?? [];
   const showRememberButton = shouldOfferRememberedAuthorization(action);
+  const impactLines = describeActionImpact(action);
 
   return (
     <div className="dialog-backdrop">
@@ -56,6 +58,11 @@ export function ConfirmDialog({
           <>
             <div className="safety-panel">
               <p>{describeActionRisk(action)}</p>
+              <ul className="safety-impact-list">
+                {impactLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
               <p className="rollback-note">{describeRollbackStrategy(action)}</p>
               {!showRememberButton && <p>高风险动作每次都要确认, 不会被记住为永久授权.</p>}
             </div>

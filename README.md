@@ -33,8 +33,9 @@ Aiko 是一个面向 Windows 的本地助手型桌宠原型。它的目标不是
 - 高风险文件能力: 目录列举, 文件读取, 文件写入, 删除到 Aiko trash, 从 Aiko trash 恢复
 - 受控 PowerShell 能力: 只允许单条只读 allowlist cmdlet, 禁止管道, 重定向, 分号, 嵌套 shell 和敏感路径
 - 动作审计面板: 可按风险, 能力, 结果和关键词筛选日志
-- 动作审计面板: 可查看备份路径, trash 隔离路径和 Shell 输出
-- 动作审计面板: 可从成功删除记录里准备恢复动作, 仍然走统一高风险确认弹窗
+- 动作审计面板: 可查看备份路径, trash 隔离路径和按 exit code, stdout, stderr 分级的 Shell 输出
+- 动作审计面板: 可查看 Aiko trash 恢复历史, 并从待恢复记录里准备恢复动作
+- 高风险确认弹窗: 会按能力展示本次动作的具体影响范围, 并保留回滚说明
 - 腾讯云一句话 ASR provider
 - 腾讯云 TTS provider, 默认超自然大模型音色 `603007 邻家女孩`
 
@@ -268,8 +269,10 @@ src/renderer/components/MemoryPanel.tsx
 - Shell 只允许单条只读 PowerShell allowlist cmdlet
 - Shell 禁止管道, 重定向, 分号, 嵌套 shell 和敏感路径目标
 - 高风险动作不会被永久授权
-- 审计面板可以查看执行结果, 备份路径, trash 路径和 Shell 输出
+- 审计面板可以查看执行结果, 备份路径, trash 路径和 Shell 分级输出
+- 审计面板可以查看恢复历史, 区分待恢复和已恢复记录
 - 审计面板发起恢复时仍然必须经过确认弹窗
+- 确认弹窗会按能力展示本次动作的具体影响和恢复策略
 
 ## 语音状态
 
