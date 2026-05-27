@@ -197,6 +197,13 @@ export function App() {
     setPendingAction(null);
   }
 
+  // 从审计面板准备一个需要确认的动作, 例如从 Aiko trash 恢复文件.
+  function handleAuditProposedAction(action: PendingActionDto, nextMessage?: string) {
+    setPendingAction(action);
+    if (nextMessage) setMessage(nextMessage);
+    showControls();
+  }
+
   // 切换窗口点击穿透状态.
   // 拒绝当前待确认动作, 通知主进程恢复 LangGraph 审批并清理会话.
   async function cancelPendingAction(action: PendingActionDto | null = pendingAction) {
@@ -348,7 +355,7 @@ export function App() {
               {activePanel === "reminders" && <ReminderPanel onStatus={setMessage} />}
               {activePanel === "memory" && <MemoryPanel onStatus={setMessage} />}
               {activePanel === "agent" && <AgentDebugPanel />}
-              {activePanel === "audit" && <ActionAuditPanel />}
+              {activePanel === "audit" && <ActionAuditPanel onProposeAction={handleAuditProposedAction} />}
               {activePanel === "settings" && <SettingsPanel />}
             </PanelShell>
           </div>
