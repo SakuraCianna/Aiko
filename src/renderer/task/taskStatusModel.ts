@@ -32,6 +32,7 @@ const TASK_STEPS: StepDefinition[] = [
   { id: "retrieval", label: "整理上下文", phases: ["retrieving"] },
   { id: "planning", label: "规划步骤", phases: ["planning", "model_generating"] },
   { id: "action", label: "准备安全动作", phases: ["preparing_action", "waiting_approval", "action_executing"] },
+  { id: "screen", label: "分析屏幕", phases: ["screen_analyzing"] },
   { id: "memory", label: "整理记忆", phases: ["memory_writing"] },
   { id: "finish", label: "完成收尾", phases: ["completed", "failed", "cancelled"] }
 ];
@@ -46,6 +47,7 @@ const PHASE_TITLES: Record<AikoAgentStatusEventDto["phase"], string> = {
   model_generating: "生成回复",
   memory_writing: "整理长期记忆",
   action_executing: "执行本地动作",
+  screen_analyzing: "分析屏幕",
   completed: "任务完成",
   failed: "任务遇到问题",
   cancelled: "任务已中止"

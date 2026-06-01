@@ -406,6 +406,24 @@ button {
   font-size: 13px;
 }
 
+.critical-confirm-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid rgba(177, 83, 93, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #354b5e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.critical-confirm-check input {
+  margin-top: 3px;
+}
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1070,6 +1088,46 @@ button {
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.trace-history-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trace-history-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(73, 101, 126, 0.14);
+  border-radius: 8px;
+  background: rgba(248, 251, 253, 0.78);
+}
+
+.trace-history-list strong,
+.trace-history-list code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trace-history-list span {
+  color: #667789;
+  font-size: 12px;
+}
+
+.trace-history-list code {
+  grid-column: 1 / -1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(36, 49, 63, 0.06);
+  color: #42586c;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 @media (max-width: 720px) {

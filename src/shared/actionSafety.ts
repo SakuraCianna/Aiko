@@ -39,6 +39,7 @@ export function describeActionImpact(action: ActionSafetyLike): string[] {
     case "run_shell_command":
       return [
         `将执行受控 PowerShell 只读命令: ${action.target}.`,
+        "只允许单条 allowlist 只读 cmdlet, 禁止管道, 重定向, 分号和嵌套 shell.",
         "执行后会记录 exit code, stdout 和 stderr, 但不会保证自动撤销."
       ];
     case "delete_file":
@@ -74,7 +75,10 @@ export function describeActionImpact(action: ActionSafetyLike): string[] {
     case "capture_screen":
       return [
         `将截取屏幕内容: ${action.target}.`,
-        "截图可能包含隐私内容, 会保存到桌面 Aiko 文件夹并写入动作审计."
+        `截图可能包含隐私内容, 会保存到桌面 Aiko 文件夹并写入动作审计.`,
+        readStringParam(action, "analysisPrompt")
+          ? `确认后会把截图交给多模态模型分析: ${readStringParam(action, "analysisPrompt")}.`
+          : "没有附带分析问题时只保存截图, 不会自动读取屏幕内容."
       ];
     case "window_control":
       return [
@@ -83,12 +87,14 @@ export function describeActionImpact(action: ActionSafetyLike): string[] {
       ];
     case "keyboard_input":
       return [
-        `将向当前活动窗口发送键盘输入: ${action.target}.`,
+        `将向当前活动窗口发送键盘输入: ${readStringParam(action, "keys") ?? action.target}.`,
+        "执行器会拒绝常见关闭窗口或删除内容的快捷键组合.",
         "这类动作可能影响任何当前聚焦的软件, 每次都必须单独确认."
       ];
     case "mouse_input":
       return [
-        `将移动或点击鼠标: ${action.target}.`,
+        `将移动鼠标到屏幕坐标 ${readNumberParam(action, "x") ?? "?"}, ${readNumberParam(action, "y") ?? "?"}.`,
+        `点击动作: ${readStringParam(action, "click") ?? "none"}.`,
         "鼠标动作会作用于当前屏幕坐标, 执行前请确认目标位置."
       ];
     default:
@@ -182,13 +188,13 @@ export function classifyRecoveryStrategy(action: ActionSafetyLike): RecoveryStra
       return {
         level: "manual_review",
         label: "可删除截图文件",
-        message: "截图会写入桌面 Aiko 文件夹, 如含隐私内容需要手动删除对应截图."
+        message: "截图会写入桌面 Aiko 文件夹; 如含隐私内容, 需要手动删除对应截图和分析记录."
       };
     case "window_control":
       return {
         level: "none",
         label: "不会修改文件",
-        message: "窗口查询和聚焦不会修改文件, 但会改变当前前台窗口."
+        message: "窗口查询和聚焦不会修改文件, 但会改变当前前台窗口; 如聚焦错误, 请手动切回原窗口."
       };
     case "keyboard_input":
     case "mouse_input":
@@ -223,4 +229,9 @@ export function formatRiskLabel(risk: ActionSafetyLike["risk"]): string {
 function readStringParam(action: ActionSafetyLike, key: string) {
   const value = action.params?.[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readNumberParam(action: ActionSafetyLike, key: string) {
+  const value = action.params?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

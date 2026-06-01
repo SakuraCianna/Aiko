@@ -1,4 +1,4 @@
-import { app, desktopCapturer } from "electron";
+import { app, desktopCapturer, screen } from "electron";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -38,6 +38,7 @@ export type WindowsAutomation = {
 };
 
 const MAX_SEND_KEYS_LENGTH = 120;
+const BLOCKED_SEND_KEYS_PATTERN = /(?:%\s*\{?F4\}?|\^\s*[wq]|(?:\{(?:DEL|DELETE)\}))/i;
 
 // 创建 Windows 自动化后端, 所有调用都应先经过 critical 风险确认.
 export function createWindowsAutomation(): WindowsAutomation {
@@ -45,7 +46,7 @@ export function createWindowsAutomation(): WindowsAutomation {
     async captureScreen(input) {
       const sources = await desktopCapturer.getSources({
         types: ["screen"],
-        thumbnailSize: { width: 1920, height: 1080 }
+        thumbnailSize: { width: 1600, height: 900 }
       });
       const source = sources.find((candidate) => candidate.name === input.target) ?? sources[0];
       if (!source) throw new Error("screen_source_not_found");
@@ -56,7 +57,7 @@ export function createWindowsAutomation(): WindowsAutomation {
       await writeFile(filePath, source.thumbnail.toPNG());
       return {
         filePath,
-        summary: input.analysisPrompt ? `Analysis requested: ${input.analysisPrompt}` : undefined
+        summary: input.analysisPrompt ? `已准备截图分析问题: ${input.analysisPrompt}` : undefined
       };
     },
 
@@ -85,7 +86,10 @@ export function createWindowsAutomation(): WindowsAutomation {
           }
 "@
           $process = Get-Process | Where-Object {
-            $_.MainWindowHandle -ne 0 -and ($_.MainWindowTitle -like "*$query*" -or $_.ProcessName -like "*$query*")
+            $_.MainWindowHandle -ne 0 -and (
+              $_.MainWindowTitle.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+              $_.ProcessName.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+            )
           } | Select-Object -First 1
           if (-not $process) {
             @{ focused = $false } | ConvertTo-Json -Compress
@@ -103,6 +107,9 @@ export function createWindowsAutomation(): WindowsAutomation {
       if (!input.keys || input.keys.length > MAX_SEND_KEYS_LENGTH || /[\r\n]/u.test(input.keys)) {
         throw new Error("invalid_keys");
       }
+      if (BLOCKED_SEND_KEYS_PATTERN.test(input.keys)) {
+        throw new Error("blocked_keys");
+      }
       await runPowerShellJson(
         `
           $keys = $env:AIKO_SEND_KEYS
@@ -116,6 +123,9 @@ export function createWindowsAutomation(): WindowsAutomation {
     async moveMouse(input) {
       if (!Number.isFinite(input.x) || !Number.isFinite(input.y) || input.x < 0 || input.y < 0) {
         throw new Error("invalid_mouse_position");
+      }
+      if (!isPointInsideAnyDisplay(input.x, input.y)) {
+        throw new Error("mouse_position_outside_display");
       }
       const click = input.click ?? "none";
       if (click !== "none" && click !== "left" && click !== "right") throw new Error("invalid_mouse_click");
@@ -182,4 +192,11 @@ function runPowerShellJson(script: string, env: Record<string, string> = {}) {
 // 生成截图文件名里的稳定时间戳.
 function formatTimestamp(date: Date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/u, "Z");
+}
+
+function isPointInsideAnyDisplay(x: number, y: number) {
+  return screen.getAllDisplays().some((display) => {
+    const { bounds } = display;
+    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+  });
 }

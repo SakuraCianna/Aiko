@@ -95,6 +95,7 @@ function isAgentStatusPhase(value: unknown): value is AikoAgentStatusPhase {
     value === "model_generating" ||
     value === "memory_writing" ||
     value === "action_executing" ||
+    value === "screen_analyzing" ||
     value === "completed" ||
     value === "failed" ||
     value === "cancelled"

@@ -30,6 +30,8 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const recordingSessionRef = useRef<string | null>(null);
   const recordingModeRef = useRef<"streaming" | "attachment" | null>(null);
+  const voiceTranscriptRef = useRef("");
+  const textBeforeVoiceRef = useRef("");
 
   useEffect(() => {
     return () => {
@@ -44,7 +46,8 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       if (!mountedRef.current || delta.sessionId !== recordingSessionRef.current) return;
       const transcript = delta.text.trim();
       if (transcript.length === 0) return;
-      setValue(transcript);
+      voiceTranscriptRef.current = transcript;
+      setValue(mergeVoiceTranscript(textBeforeVoiceRef.current, transcript));
     });
   }, []);
 
@@ -126,6 +129,8 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
 
     const sessionId = crypto.randomUUID();
     recordingSessionRef.current = sessionId;
+    voiceTranscriptRef.current = "";
+    textBeforeVoiceRef.current = value.trim();
     setIsRecording(true);
 
     try {
@@ -206,7 +211,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
           setError(`语音转写失败: ${result.message}`);
           return;
         }
-        submitVoiceTranscript(result.transcript);
+        submitVoiceTranscript(result.transcript || voiceTranscriptRef.current);
       } catch (error) {
         stopMicrophoneStream();
         if (mountedRef.current) {
@@ -241,7 +246,9 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
-    const mergedText = [value.trim(), normalizedTranscript].filter(Boolean).join("\n");
+    const mergedText = mergeVoiceTranscript(textBeforeVoiceRef.current, normalizedTranscript);
+    voiceTranscriptRef.current = "";
+    textBeforeVoiceRef.current = "";
     submitPayload(mergedText);
   }
 
@@ -266,6 +273,8 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   function cleanupRecording() {
     recordingSessionRef.current = null;
     recordingModeRef.current = null;
+    voiceTranscriptRef.current = "";
+    textBeforeVoiceRef.current = "";
     const recorder = recorderRef.current;
     const streamingController = streamingAsrRef.current;
     recorderRef.current = null;
@@ -351,4 +360,9 @@ function readAsDataUrl(file: File): Promise<string> {
 // 停止指定媒体流内的所有轨道.
 function stopMediaStream(stream: MediaStream) {
   stream.getTracks().forEach((track) => track.stop());
+}
+
+// 合并录音开始前的手动输入和实时转写, 避免 partial 已写进输入框后停止录音时重复提交.
+function mergeVoiceTranscript(baseText: string, transcript: string) {
+  return [baseText.trim(), transcript.trim()].filter(Boolean).join("\n");
 }

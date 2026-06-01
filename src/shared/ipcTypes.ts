@@ -47,6 +47,11 @@ export type CancelActionRequest = {
 export type ExecuteActionResponse = {
   ok: boolean;
   message: string;
+  artifact?: {
+    kind: "screenshot";
+    filePath: string;
+    analysisPrompt?: string;
+  };
 };
 
 export type ChatResponse = {
@@ -154,6 +159,7 @@ export type AikoAgentStatusPhase =
   | "model_generating"
   | "memory_writing"
   | "action_executing"
+  | "screen_analyzing"
   | "completed"
   | "failed"
   | "cancelled";

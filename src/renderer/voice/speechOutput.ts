@@ -1,6 +1,8 @@
 type SpeakOptions = {
   allowCloudTts?: boolean;
   maxCloudSegments?: number;
+  emotion?: "neutral" | "happy" | "serious" | "comfort" | "notice";
+  speed?: number;
   onStart?: () => void;
   onEnd?: () => void;
   onError?: () => void;
@@ -96,7 +98,12 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
     if (!synthesizeSpeech) return false;
     if (!AudioCtor) return false;
     try {
-      const response = await synthesizeSpeech({ text, emotion: "neutral", speed: 1 });
+      const delivery = selectVoiceDelivery(text);
+      const response = await synthesizeSpeech({
+        text,
+        emotion: options.emotion ?? delivery.emotion,
+        speed: options.speed ?? delivery.speed
+      });
       if (!response.ok || generation !== speechGeneration) return false;
       const audio = new AudioCtor(response.dataUrl);
       activeAudio = audio;
@@ -204,10 +211,11 @@ function speakWithWebSpeech(
   _generation: number
 ) {
   if (!synth) return false;
+  const delivery = selectVoiceDelivery(text);
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "zh-CN";
-  utterance.rate = 1.04;
-  utterance.pitch = 1.12;
+  utterance.rate = options.speed ?? delivery.speed;
+  utterance.pitch = delivery.pitch;
   utterance.volume = 1;
 
   const voice = selectAikoVoice(synth.getVoices());
@@ -231,6 +239,28 @@ function speakWithWebSpeech(
     utterance.onerror = () => settle(false);
     synth.speak(utterance);
   });
+}
+
+// 根据句子情绪给云端 TTS 和 Web Speech 一组轻量参数, 与角色动作保持同一方向.
+export function selectVoiceDelivery(text: string): {
+  emotion: NonNullable<SpeakOptions["emotion"]>;
+  speed: number;
+  pitch: number;
+} {
+  const normalized = normalizeSpeechText(text);
+  if (/(失败|出错|不能|无法|没有找到|暂时不可用|风险|确认|权限)/.test(normalized)) {
+    return { emotion: "serious", speed: 0.96, pitch: 1.02 };
+  }
+  if (/(已完成|成功|好了|接住了|没问题|可以)/.test(normalized)) {
+    return { emotion: "happy", speed: 1.06, pitch: 1.16 };
+  }
+  if (/(别急|先稳住|我在|慢慢来|没关系)/.test(normalized)) {
+    return { emotion: "comfort", speed: 0.94, pitch: 1.08 };
+  }
+  if (/(注意|等你确认|关键风险|高风险|截图|屏幕|窗口|键盘|鼠标)/.test(normalized)) {
+    return { emotion: "notice", speed: 0.98, pitch: 1.06 };
+  }
+  return { emotion: "neutral", speed: 1.04, pitch: 1.12 };
 }
 
 // 把 Markdown 和 UI 标记清理成适合 TTS 朗读的文本.

@@ -28,9 +28,11 @@ export function ConfirmDialog({
   onCancel
 }: ConfirmDialogProps) {
   const [selectedBatchIndexes, setSelectedBatchIndexes] = useState<number[]>([]);
+  const [criticalAcknowledged, setCriticalAcknowledged] = useState(false);
 
   useEffect(() => {
     setSelectedBatchIndexes(action?.actions?.map((_, index) => index) ?? []);
+    setCriticalAcknowledged(false);
   }, [action?.id, action?.actions]);
 
   const choices = action?.choices ?? [];
@@ -45,7 +47,10 @@ export function ConfirmDialog({
   const showRememberButton = shouldOfferRememberedAuthorization(action);
   const impactLines = describeActionImpact(action);
   const impactPreview = buildActionImpactPreview(action);
-  const canExecuteEditedAction = batchActions.length === 0 || Boolean(editedAction);
+  const requiresCriticalAcknowledgement = action.risk === "critical" && choices.length === 0;
+  const canExecuteEditedAction =
+    (batchActions.length === 0 || Boolean(editedAction)) &&
+    (!requiresCriticalAcknowledgement || criticalAcknowledged);
 
   return (
     <div className="dialog-backdrop">
@@ -92,6 +97,16 @@ export function ConfirmDialog({
               </div>
               <p className="rollback-note">{describeRollbackStrategy(action)}</p>
               {!showRememberButton && <p>高风险动作每次都要确认, 不会被记住为永久授权.</p>}
+              {requiresCriticalAcknowledgement && (
+                <label className="critical-confirm-check">
+                  <input
+                    type="checkbox"
+                    checked={criticalAcknowledged}
+                    onChange={(event) => setCriticalAcknowledged(event.currentTarget.checked)}
+                  />
+                  <span>我确认当前屏幕, 活动窗口或坐标就是这次要操作的目标.</span>
+                </label>
+              )}
             </div>
             {batchActions.length > 0 && (
               <ol className="batch-action-list">

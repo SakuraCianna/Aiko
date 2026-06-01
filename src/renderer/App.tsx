@@ -357,6 +357,10 @@ export function App() {
       maxCloudSegments: speechOptions.maxCloudSegments,
       onMouthOpen: setMouthOpen,
       onStart: () => setCharacterBehaviorNow(speakingBehavior),
+      onSegmentStart: (segment, index) => {
+        if (index === 0) return;
+        requestCharacterMotion(selectSpeechMotion(segment));
+      },
       onEnd: () => {
         setMouthOpen(0);
         setCharacterBehavior(afterSpeech);

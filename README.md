@@ -25,7 +25,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 - 记忆检索: `sqlite-vec`, 不可用时降级到 JSON 向量
 - 网页搜索: Tavily MCP
 - 天气工具: Open-Meteo typed tool
-- 语音: AudioWorklet 麦克风采集 + 腾讯云 ASR/TTS + Web Speech fallback
+- 语音: AudioWorklet 麦克风采集 + 腾讯云实时 ASR WebSocket partial transcript + 腾讯云 TTS + Web Speech fallback
 - 权限: 本地能力确认弹窗 + 权限策略矩阵 + Action Journal
 
 ## 已实现能力
@@ -66,6 +66,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 - 删除到 Aiko trash, 从 Aiko trash 恢复.
 - 受控 PowerShell 命令, 仅允许只读 allowlist 命令.
 - critical 风险能力: 截屏, 窗口控制, 键盘输入, 鼠标输入.
+- 带分析问题的截屏动作在用户确认后会把截图交给多模态模型分析.
 - 高风险和 critical 动作默认不允许永久授权.
 - 审计面板支持按风险, 能力, 结果和关键词筛选.
 
@@ -73,7 +74,8 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 
 - 麦克风使用 AudioWorklet 录音.
 - Renderer 会边录边切 PCM16 分片, 推送给主进程 ASR session.
-- 当前腾讯云 ASR provider 是 buffered 兼容层, 结束录音后调用一句话识别.
+- 启用实时 ASR 时会走腾讯云 WebSocket provider, 支持 partial transcript 边说边显示.
+- 未启用实时 ASR 时会降级到 buffered 兼容层, 结束录音后调用一句话识别.
 - 腾讯云 TTS 可分句播放回复.
 - TTS 不可用时降级到浏览器 Web Speech.
 - 中止回复会停止当前 TTS 播放.
@@ -81,10 +83,8 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 
 ## 尚未完成的增强
 
-- 腾讯云实时 ASR WebSocket 和真实 partial transcript.
 - zero-shot voice cloning.
 - 任意 Shell 命令的完整撤销后台.
-- 截屏后的多模态自动分析链路.
 - 更完整的窗口控制, 键鼠自动化产品化边界.
 - 更细腻的动作, 表情, 语音情绪同步.
 
@@ -118,6 +118,19 @@ npm run dev
 
 ```powershell
 npm run typecheck
+npm run build
+npm run verify
+```
+
+当前分支已按项目要求删除自动化测试文件, 手动验证清单见:
+
+```text
+docs/manual-verification.md
+```
+
+兼容命令:
+
+```powershell
 npm test
 npm run build
 ```

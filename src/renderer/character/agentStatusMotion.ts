@@ -22,7 +22,7 @@ export function selectAgentStatusCue(status: AikoAgentStatusEventDto): Character
         motion: "notice"
       };
     case "waiting_approval":
-      return selectWaitingCue(0);
+      return selectActionWaitingCue(status);
     case "model_generating":
       return {
         behavior: "thinking",
@@ -37,6 +37,11 @@ export function selectAgentStatusCue(status: AikoAgentStatusEventDto): Character
       return {
         behavior: "presenting",
         motion: "tap"
+      };
+    case "screen_analyzing":
+      return {
+        behavior: "searching",
+        motion: "focus"
       };
     case "cancelled":
       return {
@@ -53,4 +58,21 @@ export function selectAgentStatusCue(status: AikoAgentStatusEventDto): Character
     default:
       return null;
   }
+}
+
+function selectActionWaitingCue(status: AikoAgentStatusEventDto): CharacterCue {
+  const capability = typeof status.detail?.capability === "string" ? status.detail.capability : "";
+  if (capability === "capture_screen") {
+    return {
+      behavior: "waiting",
+      motion: "focus"
+    };
+  }
+  if (capability === "keyboard_input" || capability === "mouse_input" || capability === "window_control") {
+    return {
+      behavior: "confirming",
+      motion: "notice"
+    };
+  }
+  return selectWaitingCue(0);
 }

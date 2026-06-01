@@ -241,7 +241,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       const output = formatShellCommandOutput(result.stdout, result.stderr);
       return {
         ok: result.exitCode === 0 && !result.timedOut,
-        message: `Shell command finished with exit code ${result.exitCode ?? "timeout"}.\n${output}`
+        message: `Shell 命令执行结束, 退出码 ${result.exitCode ?? "timeout"}.\n${output}`
       };
     }
 
@@ -253,7 +253,12 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       });
       return {
         ok: true,
-        message: `Screen captured: ${result.filePath}${result.summary ? `\n${result.summary}` : ""}`
+        message: `截图已保存: ${result.filePath}${result.summary ? `\n${result.summary}` : ""}`,
+        artifact: {
+          kind: "screenshot",
+          filePath: result.filePath,
+          analysisPrompt: readStringParam(action.params, "analysisPrompt") ?? undefined
+        }
       };
     }
 
@@ -263,13 +268,13 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       if (operation === "list") {
         const windows = await deps.windowsAutomation.listWindows();
         const lines = windows.map((item) => `${item.processName}(${item.processId}): ${item.title}`);
-        return { ok: true, message: `Open windows:\n${lines.join("\n") || "No visible windows."}` };
+        return { ok: true, message: `当前可见窗口:\n${lines.join("\n") || "没有找到可见窗口."}` };
       }
       if (operation === "focus") {
         const result = await deps.windowsAutomation.focusWindow(action.target);
         return result.focused
-          ? { ok: true, message: `Window focused: ${result.title ?? action.target}` }
-          : { ok: false, message: `Window not found: ${action.target}` };
+          ? { ok: true, message: `已聚焦窗口: ${result.title ?? action.target}` }
+          : { ok: false, message: `没有找到窗口: ${action.target}` };
       }
       return { ok: false, message: describeActionFailure(action, "invalid") };
     }
@@ -278,7 +283,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
       const keys = readStringParam(action.params, "keys");
       if (!deps.windowsAutomation || !keys) return { ok: false, message: describeActionFailure(action, "invalid") };
       await deps.windowsAutomation.sendKeys({ keys });
-      return { ok: true, message: "Keyboard input sent to the active window." };
+      return { ok: true, message: "键盘输入已发送到当前活动窗口." };
     }
 
     if (action.capability === "mouse_input") {
@@ -289,7 +294,7 @@ export function createActionExecutor(deps: ActionExecutorDeps) {
         return { ok: false, message: describeActionFailure(action, "invalid") };
       }
       await deps.windowsAutomation.moveMouse({ x, y, click: (click ?? "none") as "none" | "left" | "right" });
-      return { ok: true, message: `Mouse moved to ${x}, ${y}${click && click !== "none" ? ` and ${click} clicked` : ""}.` };
+      return { ok: true, message: `鼠标已移动到 ${x}, ${y}${click && click !== "none" ? `, 并执行 ${click} 点击` : ""}.` };
     }
 
     if (action.capability === "read_file") {

@@ -22,10 +22,13 @@ type RealtimeAsrSession = {
   socket: WebSocket;
   language: string;
   latestTranscript: string;
+  stableSegments: Map<number, string>;
+  partialText: string;
   onTranscript?: SpeechStreamStartInput["onTranscript"];
   finish?: {
     resolve: (result: SpeechStreamFinishResult) => void;
     reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   };
 };
 
@@ -58,11 +61,18 @@ export function createTencentCloudRealtimeAsrProvider(
         socket,
         language: config.language,
         latestTranscript: "",
+        stableSegments: new Map(),
+        partialText: "",
         onTranscript: input.onTranscript
       };
       sessions.set(input.sessionId, session);
+      try {
+        await waitForSocketOpen(socket, config.timeoutMs);
+      } catch (error) {
+        sessions.delete(input.sessionId);
+        throw error;
+      }
       attachSocketHandlers(session, sessions);
-      await waitForSocketOpen(socket, config.timeoutMs);
     },
 
     // 将 renderer 传来的 PCM16LE 分片发送给腾讯云.
@@ -86,14 +96,22 @@ export function createTencentCloudRealtimeAsrProvider(
         session.finish = {
           resolve: (result) => {
             sessions.delete(input.sessionId);
+            clearFinishTimer(session);
             closeSocketQuietly(session.socket);
             resolve(result);
           },
           reject: (error) => {
             sessions.delete(input.sessionId);
+            clearFinishTimer(session);
             closeSocketQuietly(session.socket);
             reject(error);
-          }
+          },
+          timer: setTimeout(() => {
+            sessions.delete(input.sessionId);
+            session.finish = undefined;
+            closeSocketQuietly(session.socket);
+            resolve({ transcript: session.latestTranscript, language: session.language });
+          }, config.timeoutMs)
         };
       });
     },
@@ -148,30 +166,63 @@ function attachSocketHandlers(session: RealtimeAsrSession, sessions: Map<string,
 
     const text = payload.result?.voice_text_str?.trim() ?? "";
     if (text) {
-      const isFinal = payload.final === 1 || payload.result?.slice_type === 2;
-      session.latestTranscript = text;
+      const index = payload.result?.index ?? session.stableSegments.size;
+      const sliceType = payload.result?.slice_type;
+      const isFinalSlice = payload.final === 1 || sliceType === 2;
+      if (isFinalSlice) {
+        session.stableSegments.set(index, text);
+        session.partialText = "";
+      } else {
+        session.partialText = text;
+      }
+      session.latestTranscript = buildRealtimeTranscript(session);
       session.onTranscript?.({
         sessionId: session.sessionId,
-        sequence: payload.result?.index ?? 0,
-        text,
-        isFinal,
+        sequence: index,
+        text: session.latestTranscript || text,
+        isFinal: isFinalSlice,
         language: session.language
       });
     }
 
     if (payload.final === 1 && session.finish) {
-      session.finish.resolve({
-        transcript: session.latestTranscript,
-        language: session.language
-      });
+      resolveSessionFinish(session);
     }
   };
   session.socket.onerror = () => {
     session.finish?.reject(new Error("Tencent realtime ASR socket error"));
   };
   session.socket.onclose = () => {
+    resolveSessionFinish(session);
     sessions.delete(session.sessionId);
   };
+}
+
+// 腾讯云 partial 和稳态分片按 index 返回, 聚合后给 renderer 一个可直接展示的完整草稿.
+function buildRealtimeTranscript(session: RealtimeAsrSession) {
+  const stableText = [...session.stableSegments.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, text]) => text)
+    .join("");
+  return `${stableText}${session.partialText}`.trim();
+}
+
+// 统一结束 finish promise, 避免 final message 和 socket close 竞态导致重复收尾.
+function resolveSessionFinish(session: RealtimeAsrSession) {
+  const finish = session.finish;
+  if (!finish) return;
+  clearTimeout(finish.timer);
+  session.finish = undefined;
+  finish.resolve({
+    transcript: session.latestTranscript,
+    language: session.language
+  });
+}
+
+function clearFinishTimer(session: RealtimeAsrSession) {
+  const timer = session.finish?.timer;
+  session.finish = undefined;
+  if (timer) clearTimeout(timer);
 }
 
 // 等待 WebSocket 打开, 超时则释放连接.

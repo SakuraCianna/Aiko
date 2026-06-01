@@ -64,7 +64,7 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 
 - 文本输入进入 LangChain Agent。
 - 图片附件作为多模态 `image_url` 进入模型。
-- 麦克风录音先通过 AudioWorklet 切分 PCM16 分片, 再进入 streaming ASR session。当前腾讯云 provider 仍是 buffered 兼容层, 结束录音后调用一句话识别。
+- 麦克风录音先通过 AudioWorklet 切分 PCM16 分片, 再进入 streaming ASR session。启用 `AIKO_ASR_REALTIME_ENABLED` 时使用腾讯云实时 ASR WebSocket provider, 按 index 聚合 partial 和稳态分片; 未启用时降级为 buffered 兼容层, 结束录音后调用一句话识别。
 - 回复语音通过 renderer 调用 `voice:synthesize`, 当前默认 provider 是腾讯云语音合成 adapter, 不可用时回退 Web Speech。
 - 设置面板通过 `voice:status` 检查 ASR/TTS 是否启用且密钥完整, 不主动发起付费探活调用。
 - 回复支持 IPC 流式 delta，最终仍返回完整 `ChatResponse`。
@@ -115,21 +115,22 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 - `src/main/agent/subagents`
 - `src/main/agent/tools`
 - `src/main/agent/trace`
-- `tests/agent/aikoRetriever.test.ts`
-- `tests/agent/researchAgent.test.ts`
-- `tests/agent/memoryAgent.test.ts`
-- `tests/agent/aikoPlanner.test.ts`
-- `tests/agent/aikoExecutor.test.ts`
-- `tests/agent/toolRegistry.test.ts`
-- `tests/agent/aikoTrace.test.ts`
+
+下一阶段体验增强已完成：
+
+- 腾讯云实时 ASR WebSocket partial transcript。
+- 用户确认后的截图多模态分析链路。
+- critical 动作二次确认, 键盘快捷键阻断和鼠标坐标显示器校验。
+- 用户任务卡片和工程 Trace 历史分层展示。
+- TTS 情绪, 语速, 音高和 VRM 说话动作联动。
 
 仍属于后续路线：
 
-- 腾讯云实时 ASR WebSocket provider, partial transcript 和音色调优。
+- 音色调优和更细的语音情绪策略。
 - zero-shot voice cloning。
 - Model Adapter。
 - 更细的 Memory Policy, 以及可选真实 embedding provider。
-- 已开放高风险能力的撤销建议, 参数校验和用户视角任务展示仍需继续产品化。
+- 已开放高风险能力的撤销建议, 参数校验和用户视角任务展示仍需继续产品化, 其中关键风险动作已经具备二次确认和更细的审计提示。
 - 更复杂的 LangGraph 多节点工作流和 subgraph。
 
 ## Extension Rules
@@ -156,7 +157,7 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 
 ## Guardrails
 
-`tests/agent/agentArchitectureBoundary.test.ts` 会检查：
+当前分支已按项目要求删除自动化测试文件。架构边界改为通过代码审查和 `docs/manual-verification.md` 手动清单确认：
 
 - 主链路包含 `createAikoAgentRuntime`
 - Agent runtime 使用 LangChain `createAgent`

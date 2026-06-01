@@ -35,6 +35,7 @@ export function AgentDebugPanel() {
   }, []);
 
   const latestTrace = useMemo(() => snapshot.traces.at(-1) ?? null, [snapshot.traces]);
+  const recentTraces = useMemo(() => snapshot.traces.slice(-8).reverse(), [snapshot.traces]);
 
   // 从主进程读取最新 Agent 调试快照, 并防止过期异步请求覆盖新状态.
   async function refresh() {
@@ -72,7 +73,7 @@ export function AgentDebugPanel() {
         <SummaryCard title="运行" value={snapshot.runs.length} detail={formatLatestRun(snapshot)} />
         <SummaryCard title="状态" value={snapshot.statuses.length} detail={formatLatestStatus(snapshot)} />
         <SummaryCard title="体验" value={snapshot.experienceSignals.length} detail={formatLatestExperienceSignal(snapshot)} />
-        <SummaryCard title="Trace" value={snapshot.traces.length} detail={formatLatestTrace(latestTrace)} />
+        <SummaryCard title="Trace" value={snapshot.traces.length} detail={formatTraceRecordSummary(latestTrace)} />
         <SummaryCard title="动作日志" value={snapshot.actionJournal.length} detail={formatLatestAction(snapshot)} />
         <SummaryCard title="Worker" value={snapshot.workers.length} detail={snapshot.workers.map((worker) => worker.name).join(", ")} />
         <SummaryCard title="Worker Run" value={snapshot.workerRuns.length} detail={formatLatestWorkerRun(snapshot)} />
@@ -116,6 +117,22 @@ export function AgentDebugPanel() {
                 <span>{event.name}</span>
                 <small>{new Date(event.at).toLocaleTimeString()}</small>
                 {event.data && <code>{formatEventData(event.data)}</code>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="panel-section">
+        <h3>Trace 历史</h3>
+        {recentTraces.length === 0 && <p className="panel-muted">还没有工程 trace.</p>}
+        {recentTraces.length > 0 && (
+          <ol className="trace-history-list">
+            {recentTraces.map((trace) => (
+              <li key={trace.requestId}>
+                <strong>{trace.requestId}</strong>
+                <span>{formatTraceDuration(trace)}</span>
+                <code>{formatTraceRecordSummary(trace)}</code>
               </li>
             ))}
           </ol>
@@ -185,6 +202,21 @@ function formatLatestExperienceSignal(snapshot: AikoAgentDebugSnapshotDto) {
 function formatLatestTrace(trace: AikoTraceRecordDto | null) {
   if (!trace) return "";
   return trace.events.at(-1)?.name ?? "";
+}
+
+function formatTraceRecordSummary(trace: AikoTraceRecordDto | null) {
+  if (!trace) return "";
+  const lastEvent = formatLatestTrace(trace) || "no_event";
+  return `${lastEvent}, ${trace.events.length} events, ${formatTraceDuration(trace)}`;
+}
+
+function formatTraceDuration(trace: AikoTraceRecordDto) {
+  const startedAt = new Date(trace.startedAt).getTime();
+  const endedAt = trace.endedAt ? new Date(trace.endedAt).getTime() : Date.now();
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return "未知耗时";
+  const durationMs = Math.max(0, endedAt - startedAt);
+  if (durationMs < 1000) return `${durationMs}ms`;
+  return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
 // 格式化单条 Agent 状态事件, 展示 message 和少量 detail.
