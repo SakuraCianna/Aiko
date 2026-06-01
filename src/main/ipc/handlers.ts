@@ -1024,10 +1024,8 @@ function isSupportedAction(action: PendingActionDto, depth = 0): boolean {
       !!params &&
       typeof params.x === "number" &&
       Number.isFinite(params.x) &&
-      params.x >= 0 &&
       typeof params.y === "number" &&
       Number.isFinite(params.y) &&
-      params.y >= 0 &&
       (click === undefined || click === "none" || click === "left" || click === "right")
     );
   }

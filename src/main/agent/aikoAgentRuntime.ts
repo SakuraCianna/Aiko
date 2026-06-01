@@ -1623,8 +1623,8 @@ function createAikoTools(proposedActions: PendingActionDto[], registry = createD
         name: "propose_mouse_input",
         description: mouseInput?.description ?? "提出移动或点击鼠标的关键风险待确认动作. 只生成动作, 不直接移动鼠标.",
         schema: z.object({
-          x: z.number().nonnegative().describe("屏幕 X 坐标"),
-          y: z.number().nonnegative().describe("屏幕 Y 坐标"),
+          x: z.number().describe("屏幕 X 坐标"),
+          y: z.number().describe("屏幕 Y 坐标"),
           click: z.enum(["none", "left", "right"]).optional().describe("可选鼠标点击类型"),
           source: z.string().optional().describe("用户原始请求")
         })

@@ -149,7 +149,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       const startResult = await streamingController.start(stream);
       if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
         void streamingController.cancel();
-        stopMicrophoneStream();
+        stopMicrophoneStream(stream);
         return;
       }
 
@@ -179,7 +179,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     const recorder = await createWavAudioRecorder(stream);
     if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
       void recorder.stop();
-      stopMicrophoneStream();
+      stopMicrophoneStream(stream);
       return false;
     }
     recorderRef.current = recorder;
@@ -194,6 +194,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     const mode = recordingModeRef.current;
     const recorder = recorderRef.current;
     const streamingController = streamingAsrRef.current;
+    const sessionStream = streamRef.current;
     recordingSessionRef.current = null;
     recordingModeRef.current = null;
     recorderRef.current = null;
@@ -205,7 +206,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     if (mode === "streaming" && streamingController) {
       try {
         const result = await streamingController.stop();
-        stopMicrophoneStream();
+        stopMicrophoneStream(sessionStream);
         if (!mountedRef.current) return;
         if (!result.ok) {
           setError(`语音转写失败: ${result.message}`);
@@ -213,7 +214,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
         }
         submitVoiceTranscript(result.transcript || voiceTranscriptRef.current);
       } catch (error) {
-        stopMicrophoneStream();
+        stopMicrophoneStream(sessionStream);
         if (mountedRef.current) {
           setError(error instanceof Error ? `语音转写失败: ${error.message}` : "语音转写失败.");
         }
@@ -221,7 +222,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return;
     }
 
-    stopMicrophoneStream();
+    stopMicrophoneStream(sessionStream);
     if (!recorder) {
       setError("没有录到有效语音.");
       return;
@@ -286,10 +287,12 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   }
 
   // 停止麦克风流, 释放系统录音资源.
-  function stopMicrophoneStream() {
-    if (!streamRef.current) return;
-    stopMediaStream(streamRef.current);
-    streamRef.current = null;
+  function stopMicrophoneStream(stream: MediaStream | null = streamRef.current) {
+    if (!stream) return;
+    stopMediaStream(stream);
+    if (streamRef.current === stream) {
+      streamRef.current = null;
+    }
   }
 
   // 从待发送列表中移除指定附件.

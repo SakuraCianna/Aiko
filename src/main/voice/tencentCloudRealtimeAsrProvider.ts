@@ -148,10 +148,11 @@ export function createRealtimeAsrUrl(
     word_info: "0"
   });
   const sortedParams = [...params.entries()].sort(([left], [right]) => left.localeCompare(right));
-  const unsignedQuery = sortedParams.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
-  const signaturePayload = `${REALTIME_ASR_HOST}${path}?${unsignedQuery}`;
+  const signatureQuery = sortedParams.map(([key, value]) => `${key}=${value}`).join("&");
+  const requestQuery = sortedParams.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+  const signaturePayload = `${REALTIME_ASR_HOST}${path}?${signatureQuery}`;
   const signature = createHmac("sha1", config.secretKey).update(signaturePayload).digest("base64");
-  return `wss://${REALTIME_ASR_HOST}${path}?${unsignedQuery}&signature=${encodeURIComponent(signature)}`;
+  return `wss://${REALTIME_ASR_HOST}${path}?${requestQuery}&signature=${encodeURIComponent(signature)}`;
 }
 
 // 绑定 WebSocket 事件, 把腾讯云返回的分片转成内部 transcript delta.

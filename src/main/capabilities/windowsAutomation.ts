@@ -76,7 +76,12 @@ export function createWindowsAutomation(): WindowsAutomation {
     async focusWindow(query) {
       const output = await runPowerShellJson(
         `
-          $query = $env:AIKO_WINDOW_QUERY
+          $query = [string]$env:AIKO_WINDOW_QUERY
+          $query = $query.Trim()
+          if (-not $query) {
+            @{ focused = $false } | ConvertTo-Json -Compress
+            return
+          }
           Add-Type @"
           using System;
           using System.Runtime.InteropServices;
@@ -86,9 +91,11 @@ export function createWindowsAutomation(): WindowsAutomation {
           }
 "@
           $process = Get-Process | Where-Object {
+            $title = [string]$_.MainWindowTitle
+            $name = [string]$_.ProcessName
             $_.MainWindowHandle -ne 0 -and (
-              $_.MainWindowTitle.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
-              $_.ProcessName.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+              ($title.Length -gt 0 -and $title.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+              $name.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
             )
           } | Select-Object -First 1
           if (-not $process) {
@@ -121,7 +128,7 @@ export function createWindowsAutomation(): WindowsAutomation {
     },
 
     async moveMouse(input) {
-      if (!Number.isFinite(input.x) || !Number.isFinite(input.y) || input.x < 0 || input.y < 0) {
+      if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) {
         throw new Error("invalid_mouse_position");
       }
       if (!isPointInsideAnyDisplay(input.x, input.y)) {
@@ -197,6 +204,6 @@ function formatTimestamp(date: Date) {
 function isPointInsideAnyDisplay(x: number, y: number) {
   return screen.getAllDisplays().some((display) => {
     const { bounds } = display;
-    return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+    return x >= bounds.x && x < bounds.x + bounds.width && y >= bounds.y && y < bounds.y + bounds.height;
   });
 }
