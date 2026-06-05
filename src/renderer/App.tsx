@@ -12,7 +12,6 @@ import { PanelShell } from "./components/PanelShell";
 import { PetStage } from "./components/PetStage";
 import { ReminderPanel } from "./components/ReminderPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { TaskStatusCard } from "./components/TaskStatusCard";
 import { isCancellationCommand } from "./chat/cancelCommand";
 import { selectActionForCancellation } from "./chat/pendingAction";
 import { selectAgentStatusCue } from "./character/agentStatusMotion";
@@ -25,12 +24,6 @@ import {
   selectSpeechMotion
 } from "./character/motionCues";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
-import {
-  isTaskCardTerminal,
-  markTaskCardCancelled,
-  reduceTaskCardFromAgentStatus,
-  type AikoTaskCard
-} from "./task/taskStatusModel";
 
 const AMBIENT_MOTION_MIN_DELAY_MS = 14000;
 const AMBIENT_MOTION_RANDOM_DELAY_MS = 9000;
@@ -44,13 +37,11 @@ export function App() {
   const [controlsVisible, setControlsVisible] = useState(false);
   const [characterBehavior, setCharacterBehavior] = useState<CharacterBehavior>("idle");
   const [motionRequest, setMotionRequest] = useState<{ motion: CharacterMotion; id: number } | null>(null);
-  const [taskCard, setTaskCard] = useState<AikoTaskCard | null>(null);
   const [mouthOpen, setMouthOpen] = useState(0);
   const speechControllerRef = useRef<AikoSpeechController | null>(null);
   const hideControlsTimerRef = useRef<number | null>(null);
   const characterIdleTimerRef = useRef<number | null>(null);
   const ambientMotionTimerRef = useRef<number | null>(null);
-  const hideTaskCardTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const streamMotionPlayedRef = useRef(false);
 
@@ -80,7 +71,6 @@ export function App() {
       clearHideControlsTimer();
       clearCharacterIdleTimer();
       clearAmbientMotionTimer();
-      clearHideTaskCardTimer();
       activeStreamIdRef.current = null;
     };
   }, []);
@@ -89,15 +79,6 @@ export function App() {
     scheduleAmbientMotion();
     return clearAmbientMotionTimer;
   }, [characterBehavior, pendingAction]);
-
-  useEffect(() => {
-    clearHideTaskCardTimer();
-    if (!isTaskCardTerminal(taskCard)) return;
-    hideTaskCardTimerRef.current = window.setTimeout(() => {
-      setTaskCard(null);
-      hideTaskCardTimerRef.current = null;
-    }, 6000);
-  }, [taskCard]);
 
   // 判断指定请求是否仍然是当前活跃的流式请求.
   function isActiveRequest(requestId: string) {
@@ -123,7 +104,6 @@ export function App() {
   // 根据主进程发来的 Agent 阶段事件更新角色动作, 让 VRM 不只依赖前端猜测.
   function handleAgentStatus(status: Parameters<typeof selectAgentStatusCue>[0]) {
     if (status.requestId && activeStreamIdRef.current && status.requestId !== activeStreamIdRef.current) return;
-    setTaskCard((current) => reduceTaskCardFromAgentStatus(current, status));
     const cue = selectAgentStatusCue(status);
     if (!cue) return;
     setCharacterBehaviorNow(cue.behavior);
@@ -143,7 +123,6 @@ export function App() {
     activeStreamIdRef.current = requestId;
     streamMotionPlayedRef.current = false;
     setPendingAction(null);
-    setTaskCard(null);
     setMessage("正在思考...");
     const initialCue = selectInitialCharacterCue(payload);
     setCharacterBehaviorNow(initialCue.behavior);
@@ -192,7 +171,6 @@ export function App() {
     setPendingAction(null);
     speechControllerRef.current?.cancel();
     setMouthOpen(0);
-    setTaskCard((current) => markTaskCardCancelled(current));
 
     if (requestId) {
       void window.aiko.cancelStream(requestId);
@@ -296,13 +274,6 @@ export function App() {
     ambientMotionTimerRef.current = null;
   }
 
-  // 清理任务卡片自动隐藏计时器, 防止完成状态被旧 timer 提前清掉.
-  function clearHideTaskCardTimer() {
-    if (hideTaskCardTimerRef.current === null) return;
-    window.clearTimeout(hideTaskCardTimerRef.current);
-    hideTaskCardTimerRef.current = null;
-  }
-
   // 立即切换角色持续行为状态.
   function setCharacterBehaviorNow(behavior: CharacterBehavior) {
     clearCharacterIdleTimer();
@@ -327,7 +298,7 @@ export function App() {
     }, delay);
   }
 
-  // 判断当前是否适合播放待机动作, 避免打断说话, 任务和确认弹窗.
+  // 判断当前是否适合播放待机动作, 避免打断说话和确认弹窗.
   function canPlayAmbientMotion() {
     return characterBehavior === "idle" && !pendingAction && !activeStreamIdRef.current;
   }
@@ -423,7 +394,6 @@ export function App() {
           onControlsEnter={showControls}
           onControlsLeave={hideControlsSoon}
         />
-        <TaskStatusCard card={taskCard} />
         <div
           className={`hover-controls${controlsVisible ? " controls-visible" : ""}`}
           onMouseEnter={showControls}

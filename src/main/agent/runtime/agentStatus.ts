@@ -18,12 +18,18 @@ export function attachAikoAgentStatusForwarder(windows: AgentStatusWindow[], hoo
     sendAgentStatus(windows, status);
   });
   const unsubscribeBeforeTool = hooks.on("before_tool_call", (event) => {
-    sendAgentStatus(windows, createToolStatusEvent(event));
+    const status = createToolStatusEvent(event);
+    if (status) sendAgentStatus(windows, status);
+  });
+  const unsubscribeAfterTool = hooks.on("after_tool_call", (event) => {
+    const status = createToolStatusEvent(event);
+    if (status) sendAgentStatus(windows, status);
   });
 
   return () => {
     unsubscribeStatus();
     unsubscribeBeforeTool();
+    unsubscribeAfterTool();
   };
 }
 
@@ -49,10 +55,19 @@ function normalizeAgentStatusEvent(event: AikoRuntimeHookEvent): AikoAgentStatus
 }
 
 // 把本地动作执行 hook 转换成同一套 Agent 状态事件.
-function createToolStatusEvent(event: AikoRuntimeHookEvent): AikoAgentStatusEventDto {
+function createToolStatusEvent(event: AikoRuntimeHookEvent): AikoAgentStatusEventDto | null {
+  if (readHookPhase(event.payload) !== "execute") return null;
+  const ok = readHookOk(event.payload);
+  const isAfter = event.name === "after_tool_call";
+  const phase: AikoAgentStatusPhase = isAfter ? (ok === false ? "failed" : "completed") : "action_executing";
+  const message = isAfter
+    ? ok === false
+      ? "Aiko local action failed."
+      : "Aiko finished the confirmed local action."
+    : "Aiko is executing a confirmed local action.";
   return {
-    phase: "action_executing",
-    message: "Aiko is executing a confirmed local action.",
+    phase,
+    message,
     createdAt: new Date().toISOString(),
     runId: event.runId,
     detail: normalizeStatusDetail(event.payload)
@@ -81,6 +96,18 @@ function normalizeStatusDetail(value: unknown): AikoAgentStatusEventDto["detail"
     }
   }
   return Object.keys(detail).length > 0 ? detail : undefined;
+}
+
+function readHookPhase(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const phase = (value as { phase?: unknown }).phase;
+  return typeof phase === "string" ? phase : "";
+}
+
+function readHookOk(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  const ok = (value as { ok?: unknown }).ok;
+  return typeof ok === "boolean" ? ok : undefined;
 }
 
 // 判断 hook payload 里的 phase 是否属于渲染层支持的状态集合.
