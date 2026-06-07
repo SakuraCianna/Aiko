@@ -11,9 +11,18 @@ type SpeakOptions = {
   onSegmentEnd?: (segment: string, index: number) => void;
 };
 
+type SpeechDuckOptions = {
+  volume?: number;
+  fadeMs?: number;
+};
+
 export type AikoSpeechController = {
   speak: (text: string, options?: SpeakOptions) => Promise<boolean>;
   cancel: () => void;
+  duckForUserSpeech: (options?: SpeechDuckOptions) => boolean;
+  interruptForUserSpeech: () => boolean;
+  restoreVolume: (options?: { fadeMs?: number }) => void;
+  isSpeaking: () => boolean;
   isSupported: () => boolean;
 };
 
@@ -21,10 +30,36 @@ export type AikoSpeechControllerOptions = {
   synth?: SpeechSynthesis;
   synthesizeSpeech?: typeof window.aiko.synthesizeSpeech;
   AudioCtor?: typeof Audio;
+  AudioContextCtor?: typeof AudioContext;
 };
 
 const MAX_SPEECH_SEGMENT_LENGTH = 120;
 const DEFAULT_MAX_CLOUD_SEGMENTS = 4;
+const AUDIO_VOLUME_FFT_SIZE = 512;
+const AUDIO_SILENCE_FLOOR = 0.025;
+const AUDIO_MOUTH_GAIN = 4.2;
+const AUDIO_RMS_WEIGHT = 1.7;
+const AUDIO_PEAK_WEIGHT = 0.32;
+const MOUTH_ATTACK = 0.58;
+const MOUTH_RELEASE = 0.24;
+const MIN_VISIBLE_MOUTH_OPEN = 0.025;
+const EVENT_MOUTH_INTERVAL_MS = 70;
+const EVENT_MOUTH_FALLBACK_PULSE_MS = 240;
+const DEFAULT_DUCK_VOLUME = 0.32;
+const DEFAULT_DUCK_FADE_MS = 120;
+const DEFAULT_RESTORE_FADE_MS = 160;
+const VOLUME_FADE_INTERVAL_MS = 16;
+
+type MouthDriver = {
+  pulse?: (value?: number) => void;
+  resume?: () => void;
+  stop: (closeMouth?: boolean) => void;
+};
+
+type BrowserWindowWithAudio = Window &
+  typeof globalThis & {
+    webkitAudioContext?: typeof AudioContext;
+  };
 
 // 创建 Aiko 语音输出控制器, 支持分句队列, 中止和 VRM 口型驱动.
 export function createAikoSpeechController(options: AikoSpeechControllerOptions = {}): AikoSpeechController {
@@ -33,9 +68,13 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
   const synthesizeSpeech = options.synthesizeSpeech ?? browserWindow?.aiko?.synthesizeSpeech;
   const fallbackAudioCtor = typeof Audio === "undefined" ? undefined : Audio;
   const AudioCtor = options.AudioCtor ?? browserWindow?.Audio ?? fallbackAudioCtor;
+  const AudioContextCtor = options.AudioContextCtor ?? readAudioContextConstructor(browserWindow);
   let activeAudio: HTMLAudioElement | null = null;
   let speechGeneration = 0;
-  let mouthTimer: ReturnType<typeof setInterval> | null = null;
+  let activeMouthDriver: MouthDriver | null = null;
+  let activeAudioSettle: ((ok: boolean) => void) | null = null;
+  let activeWebSpeechSettle: ((ok: boolean) => void) | null = null;
+  let volumeFadeTimer: ReturnType<typeof setInterval> | null = null;
   let latestMouthCallback: ((value: number) => void) | undefined;
 
   return {
@@ -68,8 +107,34 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
 
     // 停止当前语音输出并清空口型.
     cancel() {
-      cancelActiveSpeech();
       speechGeneration += 1;
+      cancelActiveSpeech();
+    },
+
+    // 用户开始说话时先压低当前 TTS, 云端音频可渐变降音, Web Speech 则等待中止.
+    duckForUserSpeech(duckOptions = {}) {
+      if (!isSpeechActive()) return false;
+      if (!activeAudio) return true;
+      fadeAudioVolume(activeAudio, duckOptions.volume ?? DEFAULT_DUCK_VOLUME, duckOptions.fadeMs ?? DEFAULT_DUCK_FADE_MS);
+      return true;
+    },
+
+    // 用户开口被确认后中止当前 TTS, 给 ASR 输入让路.
+    interruptForUserSpeech() {
+      if (!isSpeechActive()) return false;
+      speechGeneration += 1;
+      cancelActiveSpeech();
+      return true;
+    },
+
+    // 录音结束或误触后恢复当前云端 TTS 音量.
+    restoreVolume(restoreOptions = {}) {
+      if (!activeAudio) return;
+      fadeAudioVolume(activeAudio, 1, restoreOptions.fadeMs ?? DEFAULT_RESTORE_FADE_MS);
+    },
+
+    isSpeaking() {
+      return isSpeechActive();
     },
 
     // 判断当前 renderer 是否有可用的云端 TTS 或系统语音合成.
@@ -90,7 +155,20 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
       const cloudStarted = await speakWithCloudTts(segment, options, generation);
       if (cloudStarted) return true;
     }
-    return speakWithWebSpeech(segment, synth, options, generation);
+    return speakWithWebSpeech(
+      segment,
+      synth,
+      options,
+      startEventMouthDriver,
+      stopMouthDriver,
+      () => generation === speechGeneration,
+      (settle) => {
+        activeWebSpeechSettle = settle;
+      },
+      (settle) => {
+        if (activeWebSpeechSettle === settle) activeWebSpeechSettle = null;
+      }
+    );
   }
 
   // 通过主进程调用云端 TTS 服务并等待该句播放结束.
@@ -107,33 +185,45 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
       if (!response.ok || generation !== speechGeneration) return false;
       const audio = new AudioCtor(response.dataUrl);
       activeAudio = audio;
-      return await playAudioElement(audio, text, options, generation);
+      return await playAudioElement(audio, options, generation);
     } catch {
       return false;
     }
   }
 
   // 播放 HTMLAudioElement, 把播放生命周期转成 Promise.
-  function playAudioElement(audio: HTMLAudioElement, segment: string, options: SpeakOptions, generation: number) {
+  function playAudioElement(audio: HTMLAudioElement, options: SpeakOptions, generation: number) {
     return new Promise<boolean>((resolve) => {
       let resolved = false;
       const settle = (ok: boolean) => {
         if (resolved) return;
         resolved = true;
-        if (activeAudio === audio) activeAudio = null;
+        if (activeAudio === audio) {
+          activeAudio = null;
+          activeAudioSettle = null;
+        }
+        clearVolumeFadeTimer();
         stopMouthDriver();
         resolve(ok);
       };
 
+      audio.volume = 1;
+      activeAudioSettle = settle;
       audio.onplay = () => {
         if (generation !== speechGeneration) {
           settle(false);
           return;
         }
         options.onStart?.();
-        startMouthDriver(segment, options.onMouthOpen);
+        const volumeDriverStarted = startVolumeMouthDriver(audio, options.onMouthOpen);
+        if (volumeDriverStarted) {
+          activeMouthDriver?.resume?.();
+          return;
+        }
+        const eventDriver = startEventMouthDriver(options.onMouthOpen);
+        eventDriver?.pulse?.(0.42);
       };
-      audio.onended = () => settle(true);
+      audio.onended = () => settle(generation === speechGeneration);
       audio.onerror = () => settle(false);
       void audio.play().catch(() => settle(false));
     });
@@ -142,65 +232,188 @@ export function createAikoSpeechController(options: AikoSpeechControllerOptions 
   // 停止当前 HTMLAudioElement 播放.
   function stopAudio() {
     if (!activeAudio) return;
-    activeAudio.pause();
-    activeAudio.currentTime = 0;
+    const audio = activeAudio;
+    const settle = activeAudioSettle;
     activeAudio = null;
+    activeAudioSettle = null;
+    audio.pause();
+    audio.currentTime = 0;
+    settle?.(false);
   }
 
   // 停止当前语音输出, 包括云端音频, Web Speech 和口型驱动.
   function cancelActiveSpeech() {
     stopAudio();
     synth?.cancel();
+    activeWebSpeechSettle?.(false);
+    activeWebSpeechSettle = null;
+    clearVolumeFadeTimer();
     stopMouthDriver();
   }
 
-  // 启动基于文本音素能量曲线的口型驱动, 比固定正弦更贴近当前朗读内容.
-  function startMouthDriver(segment: string, onMouthOpen: ((value: number) => void) | undefined) {
+  // 云端 TTS 返回真实音频后, 直接采样当前播放波形的音量来驱动口型.
+  function startVolumeMouthDriver(audio: HTMLAudioElement, onMouthOpen: ((value: number) => void) | undefined) {
     latestMouthCallback = onMouthOpen;
-    if (!latestMouthCallback) return;
+    if (!latestMouthCallback || !AudioContextCtor) return false;
     stopMouthDriver(false);
-    const timeline = createMouthShapeTimeline(segment);
-    let frameIndex = 0;
-    latestMouthCallback(timeline[frameIndex] ?? 0.45);
-    mouthTimer = setInterval(() => {
-      frameIndex = (frameIndex + 1) % timeline.length;
-      latestMouthCallback?.(timeline[frameIndex] ?? 0.25);
-    }, 90);
+    try {
+      const audioContext = new AudioContextCtor();
+      const source = audioContext.createMediaElementSource(audio);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = AUDIO_VOLUME_FFT_SIZE;
+      analyser.smoothingTimeConstant = 0;
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+
+      const samples = new Uint8Array(analyser.fftSize);
+      let frameId: number | null = null;
+      let stopped = false;
+      let smoothedMouthOpen = 0;
+
+      const resume = () => {
+        if (audioContext.state === "suspended") {
+          void audioContext.resume().catch(() => undefined);
+        }
+      };
+
+      const tick = () => {
+        if (stopped) return;
+        analyser.getByteTimeDomainData(samples);
+        const targetMouthOpen = calculateVolumeMouthOpen(samples);
+        const smoothing = targetMouthOpen > smoothedMouthOpen ? MOUTH_ATTACK : MOUTH_RELEASE;
+        smoothedMouthOpen += (targetMouthOpen - smoothedMouthOpen) * smoothing;
+        latestMouthCallback?.(smoothedMouthOpen < MIN_VISIBLE_MOUTH_OPEN ? 0 : smoothedMouthOpen);
+        frameId = requestAnimationFrame(tick);
+      };
+
+      activeMouthDriver = {
+        resume,
+        stop(closeMouth = true) {
+          stopped = true;
+          if (frameId !== null) cancelAnimationFrame(frameId);
+          source.disconnect();
+          analyser.disconnect();
+          if (audioContext.state !== "closed") {
+            void audioContext.close().catch(() => undefined);
+          }
+          if (closeMouth) latestMouthCallback?.(0);
+        }
+      };
+
+      resume();
+      tick();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Web Speech 不暴露合成后的音频帧, 这里只做事件级兼容口型.
+  function startEventMouthDriver(onMouthOpen: ((value: number) => void) | undefined): MouthDriver | null {
+    latestMouthCallback = onMouthOpen;
+    if (!latestMouthCallback) return null;
+    stopMouthDriver(false);
+
+    let currentMouthOpen = 0;
+    let targetMouthOpen = 0;
+    let lastPulseAt = readNow();
+
+    const timer = setInterval(() => {
+      const now = readNow();
+      if (now - lastPulseAt > EVENT_MOUTH_FALLBACK_PULSE_MS) {
+        targetMouthOpen = Math.max(targetMouthOpen, 0.34);
+        lastPulseAt = now;
+      }
+      const smoothing = targetMouthOpen > currentMouthOpen ? MOUTH_ATTACK : MOUTH_RELEASE;
+      currentMouthOpen += (targetMouthOpen - currentMouthOpen) * smoothing;
+      latestMouthCallback?.(currentMouthOpen < MIN_VISIBLE_MOUTH_OPEN ? 0 : currentMouthOpen);
+      targetMouthOpen *= 0.6;
+    }, EVENT_MOUTH_INTERVAL_MS);
+
+    const driver: MouthDriver = {
+      pulse(value = 0.52) {
+        targetMouthOpen = Math.max(targetMouthOpen, value);
+        lastPulseAt = readNow();
+      },
+      stop(closeMouth = true) {
+        clearInterval(timer);
+        if (closeMouth) latestMouthCallback?.(0);
+      }
+    };
+    activeMouthDriver = driver;
+    return driver;
   }
 
   // 停止口型驱动并让嘴部闭合.
   function stopMouthDriver(closeMouth = true) {
-    if (mouthTimer) {
-      clearInterval(mouthTimer);
-      mouthTimer = null;
+    const driver = activeMouthDriver;
+    activeMouthDriver = null;
+    if (driver) {
+      driver.stop(closeMouth);
+      return;
     }
     if (closeMouth) latestMouthCallback?.(0);
   }
-}
 
-// 根据文本生成轻量音素能量曲线, 用于驱动 VRM 嘴部开合.
-export function createMouthShapeTimeline(text: string): number[] {
-  const chars = normalizeSpeechText(text).split("").filter((char) => char.trim().length > 0);
-  if (chars.length === 0) return [0];
-
-  const values: number[] = [];
-  for (const char of chars) {
-    const energy = estimateMouthEnergy(char);
-    values.push(Math.max(0.08, energy * 0.45));
-    values.push(energy);
-    values.push(Math.max(0.12, energy * 0.35));
+  function isSpeechActive() {
+    return Boolean(activeAudio || activeAudioSettle || activeWebSpeechSettle);
   }
-  values.push(0);
-  return values;
+
+  function fadeAudioVolume(audio: HTMLAudioElement, targetVolume: number, fadeMs: number) {
+    clearVolumeFadeTimer();
+    const fromVolume = audio.volume;
+    const nextVolume = clamp(targetVolume, 0, 1);
+    if (fadeMs <= 0) {
+      audio.volume = nextVolume;
+      return;
+    }
+
+    const startedAt = readNow();
+    volumeFadeTimer = setInterval(() => {
+      const progress = clamp((readNow() - startedAt) / fadeMs, 0, 1);
+      audio.volume = fromVolume + (nextVolume - fromVolume) * progress;
+      if (progress >= 1) clearVolumeFadeTimer();
+    }, VOLUME_FADE_INTERVAL_MS);
+  }
+
+  function clearVolumeFadeTimer() {
+    if (!volumeFadeTimer) return;
+    clearInterval(volumeFadeTimer);
+    volumeFadeTimer = null;
+  }
 }
 
-// 粗略估算一个字符的开口强度, 中文和元音更大, 标点更小.
-function estimateMouthEnergy(char: string) {
-  if (/[\u3002\uff0c\uff01\uff1f,.!?;；:：]/.test(char)) return 0.08;
-  if (/[aAoOeEiIuUvV]/.test(char)) return 0.78;
-  if (/[\u4e00-\u9fff]/.test(char)) return 0.66;
-  if (/[bpmfdtnlgkhjqxrzcsyw]/i.test(char)) return 0.48;
-  return 0.36;
+// 把 Web Audio 的时域采样转换成 VRM 需要的 0 到 1 口型权重.
+export function calculateVolumeMouthOpen(samples: Uint8Array): number {
+  if (samples.length === 0) return 0;
+  let squareSum = 0;
+  let peak = 0;
+  for (const sample of samples) {
+    const centered = (sample - 128) / 128;
+    const absolute = Math.abs(centered);
+    squareSum += centered * centered;
+    if (absolute > peak) peak = absolute;
+  }
+
+  const rms = Math.sqrt(squareSum / samples.length);
+  const loudness = rms * AUDIO_RMS_WEIGHT + peak * AUDIO_PEAK_WEIGHT;
+  if (loudness <= AUDIO_SILENCE_FLOOR) return 0;
+  const normalized = clamp((loudness - AUDIO_SILENCE_FLOOR) * AUDIO_MOUTH_GAIN, 0, 1);
+  return clamp(0.06 + Math.pow(normalized, 0.72) * 0.88, 0, 1);
+}
+
+// 读取可用的 Web Audio 构造器, 兼容旧 WebKit 命名.
+function readAudioContextConstructor(browserWindow: (Window & typeof globalThis) | undefined) {
+  const audioWindow = browserWindow as BrowserWindowWithAudio | undefined;
+  return audioWindow?.AudioContext ?? audioWindow?.webkitAudioContext;
+}
+
+function readNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 // 使用浏览器 Web Speech API 作为兜底语音合成.
@@ -208,7 +421,11 @@ function speakWithWebSpeech(
   text: string,
   synth: SpeechSynthesis | undefined,
   options: SpeakOptions,
-  _generation: number
+  startEventMouthDriver: (onMouthOpen: ((value: number) => void) | undefined) => MouthDriver | null,
+  stopMouthDriver: (closeMouth?: boolean) => void,
+  isCurrentGeneration: () => boolean,
+  registerSettle: (settle: (ok: boolean) => void) => void,
+  clearSettle: (settle: (ok: boolean) => void) => void
 ) {
   if (!synth) return false;
   const delivery = selectVoiceDelivery(text);
@@ -223,20 +440,31 @@ function speakWithWebSpeech(
 
   return new Promise<boolean>((resolve) => {
     let resolved = false;
-    const stopWebSpeechMouth = () => options.onMouthOpen?.(0);
     const settle = (ok: boolean) => {
       if (resolved) return;
       resolved = true;
-      stopWebSpeechMouth();
-      resolve(ok);
+      clearSettle(settle);
+      stopMouthDriver();
+      resolve(ok && isCurrentGeneration());
     };
+    let mouthDriver: MouthDriver | null = null;
 
     utterance.onstart = () => {
+      if (!isCurrentGeneration()) {
+        settle(false);
+        return;
+      }
       options.onStart?.();
-      options.onMouthOpen?.(0.5);
+      mouthDriver = startEventMouthDriver(options.onMouthOpen);
+      mouthDriver?.pulse?.(0.42);
+    };
+    utterance.onboundary = (event) => {
+      const value = event.name === "sentence" ? 0.42 : 0.58;
+      mouthDriver?.pulse?.(value);
     };
     utterance.onend = () => settle(true);
     utterance.onerror = () => settle(false);
+    registerSettle(settle);
     synth.speak(utterance);
   });
 }

@@ -18,6 +18,19 @@ export type StreamingAsrController = {
   cancel: () => Promise<void>;
 };
 
+export type VoiceActivityEvent = {
+  active: boolean;
+  started: boolean;
+  ended: boolean;
+  level: number;
+  rms: number;
+  peak: number;
+};
+
+export type VoiceActivityDetector = {
+  push: (samples: Float32Array) => VoiceActivityEvent;
+};
+
 export type StreamingAsrControllerOptions = {
   api?: Pick<AikoApi, "startSpeechStream" | "pushSpeechStreamChunk" | "finishSpeechStream" | "cancelSpeechStream">;
   createRecorder?: (stream: MediaStream, options: { onPcmChunk?: (chunk: Float32Array) => void }) => Promise<WavAudioRecorder>;
@@ -25,10 +38,15 @@ export type StreamingAsrControllerOptions = {
   sampleRate?: number;
   frameMs?: number;
   onTranscript?: (text: string, result: SpeechStreamFinishResponseDto) => void;
+  onVoiceActivity?: (event: VoiceActivityEvent) => void;
 };
 
 const DEFAULT_SAMPLE_RATE = 16000;
 const DEFAULT_FRAME_MS = 200;
+const VOICE_ACTIVITY_RMS_THRESHOLD = 0.028;
+const VOICE_ACTIVITY_PEAK_THRESHOLD = 0.09;
+const VOICE_ACTIVITY_START_MS = 120;
+const VOICE_ACTIVITY_END_MS = 420;
 
 // 创建 PCM16 分包器, 默认按腾讯云实时 ASR 推荐的 16k/200ms/6400 bytes 切片.
 export function createPcm16FrameChunker(options: { sampleRate?: number; frameMs?: number } = {}): Pcm16FrameChunker {
@@ -69,6 +87,7 @@ export function createStreamingAsrController(options: StreamingAsrControllerOpti
   const sampleRate = options.sampleRate ?? DEFAULT_SAMPLE_RATE;
   const frameMs = options.frameMs ?? DEFAULT_FRAME_MS;
   const chunker = createPcm16FrameChunker({ sampleRate, frameMs });
+  const voiceActivityDetector = createVoiceActivityDetector({ sampleRate });
   let sessionId = "";
   let sequence = 0;
   let recorder: WavAudioRecorder | null = null;
@@ -87,6 +106,7 @@ export function createStreamingAsrController(options: StreamingAsrControllerOpti
         recorder = await createRecorder(stream, {
           onPcmChunk(chunk) {
             if (!active) return;
+            options.onVoiceActivity?.(voiceActivityDetector.push(chunk));
             enqueueFrames(chunker.append(chunk), false);
           }
         });
@@ -154,6 +174,66 @@ export function createStreamingAsrController(options: StreamingAsrControllerOpti
       return { ok: false, message: error instanceof Error ? error.message : "Failed to push speech stream chunk" };
     }
   }
+}
+
+// 创建本地轻量 VAD, 用于在腾讯云 ASR 返回 partial 前尽早发现用户开口.
+export function createVoiceActivityDetector(options: { sampleRate?: number } = {}): VoiceActivityDetector {
+  const sampleRate = options.sampleRate ?? DEFAULT_SAMPLE_RATE;
+  let activeMs = 0;
+  let quietMs = 0;
+  let active = false;
+
+  return {
+    push(samples) {
+      const { rms, peak } = calculatePcmLevel(samples);
+      const level = Math.max(rms * 2.2, peak * 0.72);
+      const chunkMs = (samples.length / sampleRate) * 1000;
+      const speechCandidate = rms >= VOICE_ACTIVITY_RMS_THRESHOLD && peak >= VOICE_ACTIVITY_PEAK_THRESHOLD;
+      let started = false;
+      let ended = false;
+
+      if (speechCandidate) {
+        activeMs += chunkMs;
+        quietMs = 0;
+        if (!active && activeMs >= VOICE_ACTIVITY_START_MS) {
+          active = true;
+          started = true;
+        }
+      } else {
+        quietMs += chunkMs;
+        activeMs = 0;
+        if (active && quietMs >= VOICE_ACTIVITY_END_MS) {
+          active = false;
+          ended = true;
+        }
+      }
+
+      return {
+        active,
+        started,
+        ended,
+        level: Math.max(0, Math.min(1, level)),
+        rms,
+        peak
+      };
+    }
+  };
+}
+
+function calculatePcmLevel(samples: Float32Array) {
+  if (samples.length === 0) return { rms: 0, peak: 0 };
+  let squareSum = 0;
+  let peak = 0;
+  for (const sample of samples) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    const absolute = Math.abs(clamped);
+    squareSum += clamped * clamped;
+    if (absolute > peak) peak = absolute;
+  }
+  return {
+    rms: Math.sqrt(squareSum / samples.length),
+    peak
+  };
 }
 
 // 拼接两个 Float32 PCM 数组, 用于保留尚未凑够一帧的样本.

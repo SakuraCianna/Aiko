@@ -25,7 +25,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 - 记忆检索: `sqlite-vec`, 不可用时降级到 JSON 向量
 - 网页搜索: Tavily MCP
 - 天气工具: Open-Meteo typed tool
-- 语音: AudioWorklet 麦克风采集 + 腾讯云实时 ASR WebSocket partial transcript + 腾讯云 TTS + Web Speech fallback
+- 语音: AudioWorklet 麦克风采集 + 本地 VAD 打断 + 腾讯云实时 ASR WebSocket partial transcript + 腾讯云 TTS + Web Speech fallback
 - 权限: 本地能力确认弹窗 + 权限策略矩阵 + Action Journal
 
 ## 已实现能力
@@ -35,7 +35,7 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 - VRM 模型加载, 透明桌宠窗口, 鼠标视线跟踪.
 - 待机, 倾听, 思考, 说话, 搜索, 写作, 等待确认, 拖拽, 成功, 失败, 恢复等行为状态.
 - Agent 阶段事件会驱动 VRM 动作, 例如检索时搜索, 长文时写作, 等待确认时等待.
-- TTS 播放会驱动口型.
+- 腾讯云 TTS 播放会按真实音量驱动口型, Web Speech fallback 会用语音事件做兼容口型.
 - 空闲时会低频播放待机小动作.
 
 ### Agent
@@ -74,10 +74,11 @@ Aiko 是一个面向 Windows 的本地助手型桌宠。它不是无限制接管
 
 - 麦克风使用 AudioWorklet 录音.
 - Renderer 会边录边切 PCM16 分片, 推送给主进程 ASR session.
+- Renderer 会在同一批 PCM 分片上做轻量本地 VAD, 用户开口时自动降低或停止当前 TTS.
 - 启用实时 ASR 时会走腾讯云 WebSocket provider, 支持 partial transcript 边说边显示.
 - 未启用实时 ASR 时会降级到 buffered 兼容层, 结束录音后调用一句话识别.
-- 腾讯云 TTS 可分句播放回复.
-- TTS 不可用时降级到浏览器 Web Speech.
+- 腾讯云 TTS 可分句播放回复, 并通过 Web Audio 音量采样驱动 VRM 口型.
+- TTS 不可用时降级到浏览器 Web Speech, 使用 start/end/boundary 事件做兼容口型.
 - 中止回复会停止当前 TTS 播放.
 - 已有基础 TTS 缓存 provider.
 
