@@ -10,14 +10,22 @@ import {
   type ChatPayload
 } from "../../shared/chatPayload";
 import { createAudioAttachmentFromBlob, createWavAudioRecorder, type WavAudioRecorder } from "../audio/microphoneRecorder";
-import { createStreamingAsrController, type StreamingAsrController } from "../audio/streamingAsrController";
+import {
+  createStreamingAsrController,
+  createVoiceActivityDetector,
+  type StreamingAsrController,
+  type VoiceActivityEvent
+} from "../audio/streamingAsrController";
 
 type CommandInputProps = {
   onSubmit: (payload: ChatPayload) => void | Promise<void>;
+  onVoiceInputStart?: () => void;
+  onVoiceInputEnd?: () => void;
+  onVoiceActivity?: (event: VoiceActivityEvent) => void;
 };
 
 // 渲染桌宠底部输入框, 负责文本, 图片和麦克风录音入口.
-export function CommandInput({ onSubmit }: CommandInputProps) {
+export function CommandInput({ onSubmit, onVoiceInputStart, onVoiceInputEnd, onVoiceActivity }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [error, setError] = useState("");
@@ -32,6 +40,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
   const recordingModeRef = useRef<"streaming" | "attachment" | null>(null);
   const voiceTranscriptRef = useRef("");
   const textBeforeVoiceRef = useRef("");
+  const voiceInputActiveRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -134,17 +143,25 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     setIsRecording(true);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
       if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
         stopMediaStream(stream);
         return;
       }
 
       streamRef.current = stream;
+      markVoiceInputStarted();
       const streamingController = createStreamingAsrController({
         api: window.aiko,
         createRecorder: createWavAudioRecorder,
-        createSessionId: () => sessionId
+        createSessionId: () => sessionId,
+        onVoiceActivity
       });
       const startResult = await streamingController.start(stream);
       if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
@@ -176,7 +193,12 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
       return false;
     }
 
-    const recorder = await createWavAudioRecorder(stream);
+    const voiceActivityDetector = createVoiceActivityDetector();
+    const recorder = await createWavAudioRecorder(stream, {
+      onPcmChunk(chunk) {
+        onVoiceActivity?.(voiceActivityDetector.push(chunk));
+      }
+    });
     if (!mountedRef.current || recordingSessionRef.current !== sessionId) {
       void recorder.stop();
       stopMicrophoneStream(stream);
@@ -200,6 +222,7 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     recorderRef.current = null;
     streamingAsrRef.current = null;
     if (mountedRef.current) setIsRecording(false);
+    markVoiceInputEnded();
 
     if (!mountedRef.current) return;
 
@@ -284,6 +307,20 @@ export function CommandInput({ onSubmit }: CommandInputProps) {
     if (streamingController) void streamingController.cancel();
     stopMicrophoneStream();
     if (mountedRef.current) setIsRecording(false);
+    markVoiceInputEnded();
+  }
+
+  // 只在真实录音链路启动后通知上层, 避免权限弹窗期间误降音.
+  function markVoiceInputStarted() {
+    if (voiceInputActiveRef.current) return;
+    voiceInputActiveRef.current = true;
+    onVoiceInputStart?.();
+  }
+
+  function markVoiceInputEnded() {
+    if (!voiceInputActiveRef.current) return;
+    voiceInputActiveRef.current = false;
+    onVoiceInputEnd?.();
   }
 
   // 停止麦克风流, 释放系统录音资源.

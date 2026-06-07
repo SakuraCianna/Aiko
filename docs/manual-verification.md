@@ -6,6 +6,8 @@
 
 - 开启 `AIKO_ASR_ENABLED=true` 和 `AIKO_ASR_REALTIME_ENABLED=true`, 配置腾讯云 SecretId, SecretKey 和 AppId。
 - 点击麦克风开始说话, 输入框应在录音过程中出现 partial transcript。
+- Aiko 正在 TTS 朗读时点击麦克风, 当前 TTS 应先降低音量。
+- 继续开口说话并保持一小段时间, 当前 TTS 应停止, 角色应切到 listening 或 interrupt 动作。
 - 停止录音后, 只提交一份最终文本, 不应出现 partial 和 final 重复拼接。
 - 断网或配置缺失时, 应降级到录音附件或明确显示语音错误。
 
@@ -44,4 +46,6 @@
 - 长文或记忆整理时应进入 writing/write。
 - 等待确认时应进入 waiting 或 confirming。
 - 成功执行动作后应播放 success/proud, 失败后应播放 recovering/errorRecover。
+- 启用腾讯云 TTS 后朗读长短句, VRM 口型应随实际音量开合, 停顿处应明显闭合。
+- 禁用腾讯云 TTS 或让 TTS 不可用后触发 Web Speech fallback, 口型应随语音事件轻量开合并在结束后闭合。
 - TTS 朗读失败时, 角色应短暂停留在说话动作后回到 idle。

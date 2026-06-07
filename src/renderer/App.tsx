@@ -23,6 +23,7 @@ import {
   selectInterruptionCue,
   selectSpeechMotion
 } from "./character/motionCues";
+import type { VoiceActivityEvent } from "./audio/streamingAsrController";
 import { createAikoSpeechController, type AikoSpeechController } from "./voice/speechOutput";
 
 const AMBIENT_MOTION_MIN_DELAY_MS = 14000;
@@ -44,6 +45,7 @@ export function App() {
   const ambientMotionTimerRef = useRef<number | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const streamMotionPlayedRef = useRef(false);
+  const voiceInputActiveRef = useRef(false);
 
   useEffect(() => {
     speechControllerRef.current = createAikoSpeechController();
@@ -72,6 +74,7 @@ export function App() {
       clearCharacterIdleTimer();
       clearAmbientMotionTimer();
       activeStreamIdRef.current = null;
+      voiceInputActiveRef.current = false;
     };
   }, []);
 
@@ -109,6 +112,43 @@ export function App() {
     setCharacterBehaviorNow(cue.behavior);
     requestCharacterMotion(cue.motion);
     showControls();
+  }
+
+  // 语音输入开始后先轻降当前 TTS, 降低扬声器回灌到麦克风的概率.
+  function handleVoiceInputStart() {
+    voiceInputActiveRef.current = true;
+    speechControllerRef.current?.duckForUserSpeech({ volume: 0.38, fadeMs: 120 });
+    setCharacterBehaviorNow("listening");
+    showControls();
+  }
+
+  // 本地 VAD 确认用户开口后, 立即停止当前 TTS, 让 ASR 输入拥有优先级.
+  function handleVoiceActivity(event: VoiceActivityEvent) {
+    if (!voiceInputActiveRef.current) return;
+    if (event.ended) {
+      return;
+    }
+
+    const controller = speechControllerRef.current;
+    if (!controller?.isSpeaking()) return;
+
+    if (event.active) {
+      controller.duckForUserSpeech({ volume: 0.16, fadeMs: 80 });
+    }
+
+    if (!event.started) return;
+    const interrupted = controller.interruptForUserSpeech();
+    if (!interrupted) return;
+    setMouthOpen(0);
+    setCharacterBehaviorNow("listening");
+    requestCharacterMotion("interrupt");
+    showControls();
+  }
+
+  // 录音结束时恢复可能还在播放的云端 TTS 音量.
+  function handleVoiceInputEnd() {
+    voiceInputActiveRef.current = false;
+    speechControllerRef.current?.restoreVolume({ fadeMs: 160 });
   }
 
   // 发送用户输入到主进程 Agent, 并接收流式回复.
@@ -349,22 +389,22 @@ export function App() {
 
     void started
       .then((didStart) => {
-        if (!didStart) scheduleSpeechFallback(afterSpeech);
+        if (!didStart && !voiceInputActiveRef.current) scheduleSpeechFallback(afterSpeech);
       })
       .catch(() => {
         setMouthOpen(0);
-        scheduleSpeechFallback(afterSpeech);
+        if (!voiceInputActiveRef.current) scheduleSpeechFallback(afterSpeech);
       });
   }
 
   // 语音不可用时仍然让角色短暂停留在说话动作, 避免 UI 直接僵住.
   function scheduleSpeechFallback(afterSpeech: CharacterBehavior) {
-      clearCharacterIdleTimer();
-      setMouthOpen(0);
-      characterIdleTimerRef.current = window.setTimeout(() => {
-        setCharacterBehavior(afterSpeech);
-        characterIdleTimerRef.current = null;
-      }, 1200);
+    clearCharacterIdleTimer();
+    setMouthOpen(0);
+    characterIdleTimerRef.current = window.setTimeout(() => {
+      setCharacterBehavior(afterSpeech);
+      characterIdleTimerRef.current = null;
+    }, 1200);
   }
 
   // 显示输入控件并取消隐藏计时器.
@@ -400,7 +440,12 @@ export function App() {
           onMouseLeave={hideControlsSoon}
           onFocus={showControls}
         >
-          <CommandInput onSubmit={handleCommand} />
+          <CommandInput
+            onSubmit={handleCommand}
+            onVoiceInputStart={handleVoiceInputStart}
+            onVoiceInputEnd={handleVoiceInputEnd}
+            onVoiceActivity={handleVoiceActivity}
+          />
         </div>
       </div>
       <ConfirmDialog
