@@ -118,16 +118,25 @@ npm run dev
 常用检查:
 
 ```powershell
+npm test
 npm run typecheck
 npm run build
 npm run verify
 ```
 
-当前分支已按项目要求删除自动化测试文件, 手动验证清单见:
+自动化测试覆盖安全策略, 受控 Shell, 环境变量解析, 批量动作编辑和 Agent 稳定性纯逻辑。桌宠交互, 截屏, 语音和高风险 Windows 能力仍需要配合手动验证清单:
 
 ```text
 docs/manual-verification.md
 ```
+
+CI/CD:
+
+```text
+.github/workflows/ci.yml
+```
+
+工作流会在 Windows runner 上执行 `npm ci`, `npm run test`, `npm run typecheck`, `npm run build`, 并上传 `out/` 构建产物作为短期 artifact。当前项目还没有 installer, 签名和正式发布链路。
 
 兼容命令:
 

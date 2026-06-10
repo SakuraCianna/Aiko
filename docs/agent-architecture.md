@@ -157,7 +157,7 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 
 ## Guardrails
 
-当前分支已按项目要求删除自动化测试文件。架构边界改为通过代码审查和 `docs/manual-verification.md` 手动清单确认：
+当前分支已经恢复轻量自动化测试, 架构边界通过自动化测试, 代码审查和 `docs/manual-verification.md` 手动清单共同确认：
 
 - 主链路包含 `createAikoAgentRuntime`
 - Agent runtime 使用 LangChain `createAgent`
@@ -166,3 +166,4 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 - 旧 `createGlmClient` / `routeIntent` 没有回到运行时代码
 - LangChain provider import 只存在于 agent runtime 边界
 - 本文档存在并声明后续扩展规则
+- `npm test` 覆盖模型路由 fallback, 回复文本清理, 对话重置识别, 安全策略, 受控 Shell, 环境变量解析和批量动作编辑

@@ -931,10 +931,31 @@ export function isRetryableModelRouteError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
 
   return (
-    String(status) === "429"
-    || String(code) === "1305"
-    || /MODEL_RATE_LIMIT|rate.?limit|访问量过大|稍后再试/i.test(message)
+    isRetryableHttpStatus(status)
+    || isRetryableErrorCode(code)
+    || /MODEL_RATE_LIMIT|rate.?limit|访问量过大|稍后再试|fetch failed|network.?error|timed?.?out|timeout/i.test(message)
   );
+}
+
+// 模型路由只对临时性服务或网络错误尝试备用模型, 请求参数错误仍直接失败.
+function isRetryableHttpStatus(status: unknown) {
+  return ["408", "409", "425", "429", "500", "502", "503", "504"].includes(String(status));
+}
+
+// 覆盖 Node/fetch 常见的瞬时网络错误码和 GLM 限流码.
+function isRetryableErrorCode(code: unknown) {
+  return [
+    "1305",
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "EAI_AGAIN",
+    "ENOTFOUND",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_BODY_TIMEOUT",
+    "UND_ERR_SOCKET"
+  ].includes(String(code).toUpperCase());
 }
 
 // 创建默认 LangChain Agent 工厂, 每次请求都注入独立的动作收集器.
