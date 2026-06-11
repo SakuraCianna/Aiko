@@ -66,4 +66,22 @@ describe("evaluateCapabilityPolicy", () => {
       reason: "nested_batch_denied"
     });
   });
+
+  test("rejects batch actions that understate the batch risk", () => {
+    expect(
+      evaluateCapabilityPolicy(
+        action({
+          title: "批量执行",
+          source: "打开网页和应用",
+          risk: "low",
+          capability: "batch_actions",
+          target: "batch",
+          actions: [action()]
+        })
+      )
+    ).toMatchObject({
+      allowed: false,
+      reason: "risk_mismatch"
+    });
+  });
 });

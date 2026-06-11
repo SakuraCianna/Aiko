@@ -59,6 +59,7 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 
 新增工具时，工具只应该返回待确认动作或纯信息结果，不要在 LangChain tool 内调用 `openUrl`、
 `openApplication`、文件系统写入、shell 命令或其他高权限能力。
+新增 capability 时必须同步更新 `docs/capability-policy.md`, 并补充风险低报, 目标限制和拒绝路径测试。
 
 ## Current Agent Capabilities
 
@@ -167,3 +168,4 @@ LangChain Agent 可以推理、规划、选择工具和生成待确认动作，�
 - LangChain provider import 只存在于 agent runtime 边界
 - 本文档存在并声明后续扩展规则
 - `npm test` 覆盖模型路由 fallback, 回复文本清理, 对话重置识别, 安全策略, 受控 Shell, 环境变量解析和批量动作编辑
+- `docs/capability-policy.md` 记录安全能力矩阵, 批量动作边界和新增 capability 检查清单

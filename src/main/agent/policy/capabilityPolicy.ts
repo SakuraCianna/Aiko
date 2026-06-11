@@ -205,6 +205,7 @@ function evaluateSingleAction(action: PendingActionDto, policy: AikoCapabilityPo
 function evaluateBatchPolicy(action: PendingActionDto, policy: AikoCapabilityPolicy): AikoCapabilityPolicyDecision {
   const batchRule = policy.get("batch_actions");
   if (!batchRule) return denied("unknown_capability");
+  if (isRiskUnderstated(action.risk, batchRule.risk)) return denied("risk_mismatch");
   if (action.actions?.some((child) => child.capability === "batch_actions")) return denied("nested_batch_denied");
 
   for (const child of action.actions ?? []) {

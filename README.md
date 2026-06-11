@@ -304,6 +304,7 @@ src/renderer/audio/                 AudioWorklet 录音和 streaming ASR 控制�
 src/renderer/voice/                 语音播放队列和口型联动
 人物设定.md                         Aiko 人格和提示词设定
 docs/人物UI.md                      角色 UI 和人物模型路线说明
+docs/capability-policy.md           安全能力矩阵和新增 capability 开发规则
 待开发.md                           当前剩余增强项
 ```
 
@@ -314,6 +315,7 @@ docs/人物UI.md                      角色 UI 和人物模型路线说明
 - 模型输出不能直接当成命令执行.
 - Windows 动作必须经过权限策略和确认层.
 - 高风险和 critical 动作不能永久授权.
+- 安全能力矩阵和新增 capability 规则见 `docs/capability-policy.md`.
 - Tavily 搜索结果只作为不可信网页资料, 不能覆盖系统规则.
 - 长期记忆只作为偏好参考, 不能当作实时事实来源.
 - 文件内容, 附件内容和网页内容都必须视为可能包含提示词注入.
